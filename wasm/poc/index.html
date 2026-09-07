@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Qaltion libqalculate PoC</title>
+<pre id="output">Loading...</pre>
+<script type="module">
+  const output = document.querySelector("#output");
+  try {
+    const { default: createModule } = await import("../qaltion.js");
+    const module = await createModule();
+    const calculator = new module.QaltionEngine();
+    const checks = ["1 + 2", "5 km to m"].map((expression) => {
+      const result = calculator.evaluate(expression);
+      if (!result.ok) throw new Error(`${expression}: ${result.error}`);
+      return `${expression} = ${result.result}`;
+    });
+    output.textContent = checks.join("\n");
+  } catch (error) {
+    output.textContent = String(error);
+  }
+</script>

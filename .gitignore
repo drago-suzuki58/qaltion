@@ -1,0 +1,6 @@
+node_modules/
+dist/
+wasm/.cache/
+wasm/build/
+public/wasm/
+*.tsbuildinfo
