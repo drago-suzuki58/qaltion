@@ -24,6 +24,7 @@ const runtime: DocumentRuntime = {
   },
   variables: [],
   engine: "development-fallback",
+  status: "ready",
 };
 
 beforeAll(() => {
@@ -65,6 +66,30 @@ describe("EditorPane", () => {
     const content = container.querySelector<HTMLElement>(".bn-block-content");
     expect(outer?.classList.contains("qaltion-calculation")).toBe(true);
     expect(content?.getAttribute("data-result")).toBe("3");
+
+    await act(async () => root.unmount());
+  });
+
+  it("shows a pending marker while a calculation is running", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <EditorPane
+          note={note}
+          runtime={{ ...runtime, status: "pending" }}
+          onChange={vi.fn()}
+        />,
+      );
+    });
+
+    const outer = container.querySelector<HTMLElement>("[data-node-type='blockOuter']");
+    const content = container.querySelector<HTMLElement>(".bn-block-content");
+    expect(outer?.classList.contains("qaltion-pending")).toBe(true);
+    expect(content?.getAttribute("data-result")).toBeNull();
+    expect(container.querySelector(".editor-host")?.getAttribute("aria-busy")).toBe("true");
 
     await act(async () => root.unmount());
   });

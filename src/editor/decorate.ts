@@ -10,6 +10,7 @@ export const CalculationDecorationExtension = createExtension(({ editor }) => {
     blocks: {},
     variables: [],
     engine: "development-fallback",
+    status: "idle",
   }, {
     onUpdate() {
       editor.transact((transaction) => transaction.setMeta(pluginKey, true));
@@ -33,13 +34,27 @@ export const CalculationDecorationExtension = createExtension(({ editor }) => {
               const id = node.attrs.id as string | undefined;
               const contentNode = node.firstChild;
               const blockRuntime = id ? store.state.blocks[id] : undefined;
-              if (!id || !contentNode || !blockRuntime) return;
-              if (!blockRuntime.result && !blockRuntime.error && blockRuntime.tokens.length === 0) return;
+              if (!id || !contentNode) return;
 
-              const tokenKinds = new Set(blockRuntime.tokens.map((token) => token.kind));
+              const text = contentNode.textContent;
+              const isPendingCalculation = store.state.status === "pending"
+                && contentNode.type.name === "paragraph"
+                && text.trim().length > 0
+                && !text.startsWith("--");
+              if (!blockRuntime && !isPendingCalculation) return;
+              if (
+                blockRuntime
+                && !blockRuntime.result
+                && !blockRuntime.error
+                && blockRuntime.tokens.length === 0
+                && !isPendingCalculation
+              ) return;
+
+              const tokenKinds = new Set(blockRuntime?.tokens.map((token) => token.kind) ?? []);
               const classes = [
-                blockRuntime.result && "qaltion-calculation",
-                blockRuntime.error && "qaltion-error",
+                isPendingCalculation && "qaltion-pending",
+                !isPendingCalculation && blockRuntime?.result && "qaltion-calculation",
+                !isPendingCalculation && blockRuntime?.error && "qaltion-error",
                 tokenKinds.has("comment") && "qaltion-comment",
                 tokenKinds.has("definition") && "qaltion-definition",
                 tokenKinds.has("reference") && "qaltion-reference",
@@ -50,8 +65,9 @@ export const CalculationDecorationExtension = createExtension(({ editor }) => {
                 "data-qaltion-block-id": id,
               };
 
-              if (blockRuntime.result) contentAttributes["data-result"] = blockRuntime.result;
-              if (blockRuntime.error) contentAttributes["data-error"] = blockRuntime.error.message;
+              if (!isPendingCalculation && blockRuntime?.result) contentAttributes["data-result"] = blockRuntime.result;
+              if (!isPendingCalculation && blockRuntime?.error) contentAttributes["data-error"] = blockRuntime.error.message;
+              if (isPendingCalculation) contentAttributes["data-calculation-state"] = "pending";
               if (classes.length > 0) {
                 decorations.push(Decoration.node(position, position + node.nodeSize, { class: classes.join(" ") }));
               }

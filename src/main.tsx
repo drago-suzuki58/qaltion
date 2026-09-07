@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { MantineProvider } from "@mantine/core";
 import App from "./App";
 import "./styles.css";
 
@@ -13,6 +14,8 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <MantineProvider>
+      <App />
+    </MantineProvider>
   </StrictMode>,
 );

@@ -47,10 +47,13 @@ export const ResultBlock = createReactBlockSpec(
       const runtime = useRuntime();
       const current = runtime.blocks[props.block.id];
       const value = props.block.props.mode === "frozen" ? props.block.props.frozenValue : current?.result;
+      const pending = props.block.props.mode === "dynamic" && runtime.status === "pending";
       return (
         <div className="special-block result-block">
           <div className="result-block-expression" ref={props.contentRef} />
-          <output>{value || current?.error?.message || ""}</output>
+          <output aria-busy={pending}>
+            {pending ? <span className="calculation-spinner" aria-hidden="true" /> : value || current?.error?.message || ""}
+          </output>
         </div>
       );
     },

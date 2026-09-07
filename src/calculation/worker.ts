@@ -23,28 +23,31 @@ function nativeErrorKind(message: string): RuntimeErrorKind {
 }
 
 let nativeEngine: NativeEngine | undefined;
-let nativeAttempted = false;
+let nativeEnginePromise: Promise<NativeEngine | undefined> | undefined;
 
-async function loadNativeEngine(): Promise<NativeEngine | undefined> {
-  if (nativeAttempted) return nativeEngine;
-  nativeAttempted = true;
-  try {
-    const response = await fetch("/wasm/qaltion.js");
-    if (!response.ok) throw new Error(`Failed to load native engine: ${response.status}`);
-    const moduleUrl = URL.createObjectURL(await response.blob());
-    try {
-      const factory = (await import(/* @vite-ignore */ moduleUrl)) as {
-        default: (options?: Record<string, unknown>) => Promise<{ QaltionEngine: new () => NativeEngine }>;
-      };
-      const module = await factory.default({ locateFile: (file: string) => `/wasm/${file}` });
-      nativeEngine = new module.QaltionEngine();
-      return nativeEngine;
-    } finally {
-      URL.revokeObjectURL(moduleUrl);
-    }
-  } catch {
-    return undefined;
+function loadNativeEngine(): Promise<NativeEngine | undefined> {
+  if (!nativeEnginePromise) {
+    nativeEnginePromise = (async () => {
+      try {
+        const response = await fetch("/wasm/qaltion.js");
+        if (!response.ok) throw new Error(`Failed to load native engine: ${response.status}`);
+        const moduleUrl = URL.createObjectURL(await response.blob());
+        try {
+          const factory = (await import(/* @vite-ignore */ moduleUrl)) as {
+            default: (options?: Record<string, unknown>) => Promise<{ QaltionEngine: new () => NativeEngine }>;
+          };
+          const module = await factory.default({ locateFile: (file: string) => `/wasm/${file}` });
+          nativeEngine = new module.QaltionEngine();
+          return nativeEngine;
+        } finally {
+          URL.revokeObjectURL(moduleUrl);
+        }
+      } catch {
+        return undefined;
+      }
+    })();
   }
+  return nativeEnginePromise;
 }
 
 async function evaluateDocument(blocks: AppBlock[]): Promise<DocumentRuntime> {
@@ -58,11 +61,11 @@ async function evaluateDocument(blocks: AppBlock[]): Promise<DocumentRuntime> {
 
   if (!engine) {
     const runtime = evaluateFallbackDocument(items);
-    return { ...runtime, engine: "development-fallback" };
+    return { ...runtime, engine: "development-fallback", status: "ready" };
   }
 
   engine.resetContext();
-  const runtime: DocumentRuntime = { blocks: {}, variables: [], engine: "libqalculate" };
+  const runtime: DocumentRuntime = { blocks: {}, variables: [], engine: "libqalculate", status: "ready" };
   const definedNames = new Set<string>();
   for (const item of items) {
     if (item.type === "variables") {
@@ -92,7 +95,19 @@ async function evaluateDocument(blocks: AppBlock[]): Promise<DocumentRuntime> {
 }
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
-  void evaluateDocument(event.data.blocks).then((runtime) => {
-    self.postMessage({ id: event.data.id, runtime });
-  });
+  void evaluateDocument(event.data.blocks)
+    .then((runtime) => {
+      self.postMessage({ id: event.data.id, runtime });
+    })
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "Calculation failed.";
+      const runtime: DocumentRuntime = {
+        blocks: {},
+        variables: [],
+        engine: "development-fallback",
+        status: "error",
+        failure: message,
+      };
+      self.postMessage({ id: event.data.id, runtime });
+    });
 };

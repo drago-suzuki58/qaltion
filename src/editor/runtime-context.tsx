@@ -5,6 +5,7 @@ export const RuntimeContext = createContext<DocumentRuntime>({
   blocks: {},
   variables: [],
   engine: "development-fallback",
+  status: "idle",
 });
 
 export function useRuntime(): DocumentRuntime {

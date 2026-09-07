@@ -62,4 +62,6 @@ export type DocumentRuntime = {
   blocks: Record<string, RuntimeBlock>;
   variables: CalculationVariable[];
   engine: "libqalculate" | "development-fallback";
+  status: "idle" | "pending" | "ready" | "error";
+  failure?: string;
 };

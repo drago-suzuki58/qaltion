@@ -15,7 +15,7 @@ import { CalculationDecorationExtension } from "./decorate";
 type Props = {
   note: StoredNote;
   runtime: DocumentRuntime;
-  onChange: (blocks: AppBlock[]) => void;
+  onChange: (noteId: string, blocks: AppBlock[]) => void;
 };
 
 function customSlashItems(editor: typeof schema.BlockNoteEditor): DefaultReactSuggestionItem[] {
@@ -50,18 +50,21 @@ export function EditorPane({ note, runtime, onChange }: Props) {
   }, [editor, runtime]);
 
   useEffect(() => {
-    onChange(editor.document as AppBlock[]);
-  }, [editor, onChange]);
+    onChange(note.id, editor.document as AppBlock[]);
+  }, [editor, note.id, onChange]);
 
   return (
     <RuntimeContext.Provider value={runtime}>
-      <div className="editor-host">
+      <div className="editor-host" aria-busy={runtime.status === "pending"}>
+        <div className="visually-hidden" role="status" aria-live="polite">
+          {runtime.status === "pending" ? "Calculating" : runtime.status === "error" ? runtime.failure : ""}
+        </div>
         <BlockNoteView
           editor={editor}
           slashMenu={false}
           sideMenu={false}
           formattingToolbar={false}
-          onChange={() => onChange(editor.document as AppBlock[])}
+          onChange={() => onChange(note.id, editor.document as AppBlock[])}
         >
           <SuggestionMenuController
             triggerCharacter="/"
