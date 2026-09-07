@@ -1,3 +1,5 @@
+@import url("@blocknote/mantine/style.css");
+
 :root {
   color: #252522;
   background: #f7f6f2;
@@ -7,9 +9,10 @@
   --background: #f7f6f2;
   --surface: #fffefa;
   --text: #252522;
-  --text-muted: #8b8a83;
-  --border: #dfded7;
+  --text-muted: #686861;
+  --border: #d4d2c8;
   --accent: #4257a6;
+  --accent-soft: #e9ebf5;
   --error: #9d5149;
 }
 
@@ -60,6 +63,7 @@ button {
 
 .quiet-button,
 .note-delete {
+  min-height: 32px;
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -70,11 +74,18 @@ button {
 }
 
 .quiet-button:hover,
-.quiet-button:focus-visible,
 .note-delete:hover,
-.note-delete:focus-visible {
+.note-option:hover {
+  background: #f0efe9;
   color: var(--text);
-  outline: 1px solid var(--border);
+}
+
+.quiet-button:focus-visible,
+.note-delete:focus-visible,
+.note-option:focus-visible,
+.note-heading input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .notes-popover {
@@ -84,7 +95,7 @@ button {
   right: 40px;
   display: flex;
   flex-direction: column;
-  width: 260px;
+  width: min(260px, calc(100vw - 32px));
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--surface);
@@ -109,6 +120,7 @@ button {
   background: transparent;
   cursor: pointer;
   font-size: 13px;
+  min-height: 40px;
   padding: 8px;
   text-align: left;
 }
@@ -119,11 +131,9 @@ button {
   font-size: 11px;
 }
 
-.note-option:hover,
-.note-option:focus-visible,
 .note-option.selected {
-  background: #f0efe9;
-  outline: 0;
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
 .note-delete {
@@ -149,11 +159,35 @@ button {
   color: var(--text);
   font-size: 28px;
   font-weight: 600;
-  padding: 0;
+  padding: 0 0 4px;
+}
+
+.note-heading input:focus-visible {
+  border-radius: 2px;
 }
 
 .editor-host {
   min-width: 0;
+}
+
+.editor-host .bn-root {
+  --bn-colors-editor-text: var(--text);
+  --bn-colors-editor-background: transparent;
+  --bn-colors-menu-text: var(--text);
+  --bn-colors-menu-background: var(--surface);
+  --bn-colors-tooltip-text: var(--text);
+  --bn-colors-tooltip-background: #ebe9e1;
+  --bn-colors-hovered-text: var(--text);
+  --bn-colors-hovered-background: #f0efe9;
+  --bn-colors-selected-text: #fff;
+  --bn-colors-selected-background: var(--accent);
+  --bn-colors-disabled-text: var(--text-muted);
+  --bn-colors-disabled-background: #efeee8;
+  --bn-colors-shadow: rgb(37 37 34 / 16%);
+  --bn-colors-border: var(--border);
+  --bn-colors-side-menu: var(--text-muted);
+  --bn-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --bn-border-radius: 6px;
 }
 
 .bn-container,
@@ -331,13 +365,32 @@ button {
     right: 16px;
   }
 
+  .quiet-button,
+  .note-delete,
+  .note-option {
+    min-height: 44px;
+  }
+
   .bn-block-outer.qaltion-calculation .bn-block-content,
   .bn-block-outer.qaltion-error .bn-block-content,
   .result-block {
-    gap: 10px;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 4px;
   }
 
+  .bn-block-outer.qaltion-calculation .bn-block-content::after,
   .bn-block-outer.qaltion-error .bn-block-content::after {
-    max-width: 34%;
+    align-self: flex-start;
+    max-width: 100%;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .result-block output {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
