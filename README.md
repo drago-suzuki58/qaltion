@@ -1,6 +1,26 @@
 # Qaltion
 
-Qaltion is a local-first, plain-text calculation notebook powered by libqalculate. It evaluates logical lines from top to bottom and shows each result in a separate lane on the right of the editor.
+> [!NOTE]
+> Qaltion is experimental software and may change without notice.
+
+Qaltion is a local-first, plain-text calculation notebook powered by [libqalculate](https://qalculate.github.io/).
+
+![Screenshot](docs/screenshot.png)
+
+<p align="center">
+  <a href="https://qaltion.drsz.org/"><strong>Open Qaltion</strong></a>
+</p>
+
+## Features
+
+- Live calculations with variables, functions, units, conversions, and currencies
+- Multiple notes with automatic local saving
+- Plain-text content kept separate from results and diagnostics
+- Light and dark themes on desktop and mobile
+
+## Usage
+
+Enter one expression per line. Later lines can use variables defined above them.
 
 ```text
 # Monthly VPS cost
@@ -12,62 +32,42 @@ storage_usage = 500 GB
 server + storage * storage_usage
 ```
 
-Empty lines are not evaluated. A `#` starts a comment, including at the end of an expression. The document remains plain text: results, syntax highlighting, and diagnostics are runtime UI and are never copied into or persisted with the note.
+Empty lines are ignored. A `#` starts a comment, including at the end of an expression.
 
-## Architecture
+## Data storage and limitations
 
-```text
-React
-  -> CodeMirror 6 plain text
-  -> Calculation Worker
-  -> libqalculate WebAssembly
-```
-
-- `src/editor/` configures only the CodeMirror extensions Qaltion needs, exact-range semantic decorations, diagnostics, and the non-editable result lane.
-- `src/calculation/` owns the Worker protocol, logical-line evaluation, lexical scanner, symbol classifier, and development fallback.
-- `src/storage/` stores `StoredNote.content` in IndexedDB. Database version 2 performs a one-time best-effort conversion of earlier BlockNote PoC records to plain text.
-- `wasm/` contains the existing libqalculate C++ bridge and reproducible Emscripten build.
-
-The Worker bridge is used even when a native build is absent. The mathjs fallback is isolated in `src/calculation/fallback.ts`; generated `public/wasm/qaltion.js` and `qaltion.wasm` take precedence automatically.
-
-## Syntax highlighting
-
-Highlighting is split into three responsibilities:
-
-```text
-local lexical scanner
-  + libqalculate symbol registry (loaded once through the Worker)
-  + runtime diagnostics and undefined overlay
-```
-
-The scanner only produces source ranges. The registry classifies libqalculate functions, variables, units, currencies, prefixes, and aliases. Unknown identifiers stay neutral while typing; actual evaluation errors remain runtime diagnostics.
+- Notes are stored only in the current browser's IndexedDB. They are not sent to a server.
+- Qaltion does not currently provide accounts, synchronization, import, or export. Clearing site data deletes the stored notes, and notes do not carry over to another browser or device.
+- Currency calculations use the exchange-rate snapshot bundled with the application. Rates are not refreshed in the browser.
 
 ## Development
 
+Node.js 24 is recommended.
+
 ```sh
-npm install
+npm ci
 npm run dev
 ```
 
-Run automated checks with:
+Without generated WASM files, the development server uses a limited mathjs fallback. To run with libqalculate, install and activate the Emscripten SDK, then build the WASM module before starting the server:
+
+```sh
+npm run build:wasm
+npm run dev
+```
+
+Run the checks and create a production build with:
 
 ```sh
 npm test
 npm run build
+npm run preview
 ```
 
-## libqalculate WASM
+The generated application currently expects to be served from the root of a domain.
 
-The reproducible build entry point is `wasm/Makefile`. It targets libqalculate `v5.12.0`. Install and activate the Emscripten SDK so `em++`, `emconfigure`, and `emmake` are available on `PATH`, then run:
+## License
 
-```sh
-npm run build:wasm
-```
+Qaltion is licensed under GPL-3.0-or-later. See [LICENSE](LICENSE).
 
-The PoC verifies `1 + 2 -> 3` and `5 km to m -> 5000 m` through the same wrapper used by the app. Definition data and a bundled exchange-rate snapshot are compiled into libqalculate; network retrieval is disabled during the build. Browser-side rate refresh is not implemented.
-
-## Licensing
-
-Qaltion is licensed under GPL-3.0-or-later. See `LICENSE` for the full terms.
-
-libqalculate v5.12.0 is GPL-2.0-or-later according to its official `COPYING` file. Any distribution containing the generated WASM must also provide the corresponding libqalculate source, this wrapper, required dependency sources, and the build scripts.
+The bundled libqalculate v5.12.0 is licensed under GPL-2.0-or-later. Distributions that include the generated WASM must comply with the applicable GPL source-distribution requirements.
