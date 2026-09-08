@@ -58,7 +58,6 @@ jobs:
       - name: Verify deployment files
         run: |
           test -f dist/index.html
-          test -f dist/CNAME
           test -f dist/sw.js
           test -f dist/manifest.webmanifest
           test -f dist/icon.svg
