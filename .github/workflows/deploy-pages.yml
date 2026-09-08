@@ -1,0 +1,78 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Cache WASM build
+        uses: actions/cache@v6
+        with:
+          path: wasm/.cache
+          key: ${{ runner.os }}-emscripten-6.0.9-${{ hashFiles('wasm/Makefile') }}
+
+      - name: Setup Emscripten
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: 6.0.9
+          actions-cache-folder: emsdk-cache
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build libqalculate WASM
+        run: npm run build:wasm
+
+      - name: Build application
+        run: npm run build
+
+      - name: Verify deployment files
+        run: |
+          test -f dist/index.html
+          test -f dist/CNAME
+          test -f dist/sw.js
+          test -f dist/manifest.webmanifest
+          test -f dist/icon.svg
+          test -f dist/wasm/qaltion.js
+          test -f dist/wasm/qaltion.wasm
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
