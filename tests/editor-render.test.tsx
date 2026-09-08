@@ -3,11 +3,14 @@
 import { diagnosticCount, setDiagnostics } from "@codemirror/lint";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { runtimeDiagnostics } from "../src/editor/diagnostics";
+import { EditorPane } from "../src/editor/EditorPane";
 import { qaltionExtensions } from "../src/editor/extensions";
 import { semanticDecorationRanges, setRuntime } from "../src/editor/highlighting";
-import type { DocumentRuntime } from "../src/types";
+import type { DocumentRuntime, StoredNote } from "../src/types";
 
 const runtime: DocumentRuntime = {
   lines: [{
@@ -27,6 +30,7 @@ const runtime: DocumentRuntime = {
 };
 
 beforeAll(() => {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(window, "requestAnimationFrame", {
     configurable: true,
     value: (callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0),
@@ -52,6 +56,57 @@ afterEach(() => {
 });
 
 describe("CodeMirror calculation editor", () => {
+  it("applies a ready runtime when the Editor mounts", async () => {
+    const container = document.body.appendChild(document.createElement("div"));
+    const root = createRoot(container);
+    const note: StoredNote = {
+      id: "note-a",
+      title: "Initial note",
+      content: "1 + 2",
+      createdAt: 1,
+      updatedAt: 1,
+      lastOpenedAt: 1,
+    };
+
+    await act(async () => root.render(<EditorPane note={note} runtime={runtime} onChange={() => undefined} />));
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+
+    expect(container.querySelector(".cm-content")?.textContent).toBe("1 + 2");
+    expect(container.querySelector(".result-lane output")?.textContent).toBe("3");
+    expect(container.querySelector(".tok-number")).not.toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it("shows line position cues and local syntax before runtime results arrive", () => {
+    const parent = document.body.appendChild(document.createElement("div"));
+    const lane = parent.appendChild(document.createElement("div"));
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: "# Monthly cost\nrate = sin(pi) + 1200 JPY / month\nrate + $5",
+        extensions: qaltionExtensions({ lane, onChange: () => {} }),
+      }),
+      parent,
+    });
+
+    view.focus();
+
+    expect(parent.querySelector(".cm-lineNumbers")?.textContent).toContain("1");
+    expect(parent.querySelector(".cm-lineNumbers")?.textContent).toContain("3");
+    expect(parent.querySelector(".cm-activeLine")).not.toBeNull();
+    expect(parent.querySelector(".cm-activeLineGutter")).not.toBeNull();
+    expect(parent.querySelector(".tok-comment")?.textContent).toBe("# Monthly cost");
+    expect(parent.querySelector(".tok-number")?.textContent).toBe("1200");
+    expect(parent.querySelector(".tok-currency")?.textContent).toBe("JPY");
+    expect(Array.from(parent.querySelectorAll(".tok-operator")).some((token) => token.textContent === "/")).toBe(true);
+    expect(parent.querySelector(".tok-unit")?.textContent).toBe("month");
+    expect(parent.querySelector(".tok-definition")?.textContent).toBe("rate");
+    expect(parent.querySelector(".tok-function")?.textContent).toBe("sin");
+    expect(parent.querySelector(".tok-constant")?.textContent).toBe("pi");
+    expect(Array.from(parent.querySelectorAll(".tok-reference")).some((token) => token.textContent === "rate")).toBe(true);
+    expect(Array.from(parent.querySelectorAll(".tok-currency")).some((token) => token.textContent === "$")).toBe(true);
+    view.destroy();
+  });
+
   it("keeps content as plain text and reports document changes", () => {
     const parent = document.body.appendChild(document.createElement("div"));
     const lane = parent.appendChild(document.createElement("div"));
@@ -88,11 +143,7 @@ describe("CodeMirror calculation editor", () => {
   });
 
   it("creates exact semantic ranges and CodeMirror diagnostics", () => {
-    expect(semanticDecorationRanges(runtime, 5)).toEqual([
-      { from: 0, to: 1, className: "tok-number" },
-      { from: 2, to: 3, className: "tok-operator" },
-      { from: 4, to: 5, className: "tok-number" },
-    ]);
+    expect(semanticDecorationRanges(runtime, 5)).toEqual([]);
 
     const failure: DocumentRuntime = {
       ...runtime,
@@ -116,6 +167,32 @@ describe("CodeMirror calculation editor", () => {
     expect(diagnostics[0]).toMatchObject({ from: 0, to: 7, severity: "error", message: "Undefined symbol" });
     expect(diagnosticCount(view.state)).toBe(1);
     expect(view.contentDOM.querySelector(".tok-undefined")?.textContent).toBe("missing");
+    expect(semanticDecorationRanges(failure, 7)).toEqual([
+      { from: 0, to: 7, className: "tok-undefined" },
+    ]);
+    view.destroy();
+  });
+
+  it("keeps local syntax when the calculation engine is unavailable", () => {
+    const parent = document.body.appendChild(document.createElement("div"));
+    const lane = parent.appendChild(document.createElement("div"));
+    const view = new EditorView({
+      state: EditorState.create({ doc: "a = 100\na * 10", extensions: qaltionExtensions({ lane, onChange: () => {} }) }),
+      parent,
+    });
+    const failure: DocumentRuntime = {
+      lines: [],
+      variables: [],
+      engine: "libqalculate",
+      status: "error",
+      failure: "The calculation engine is unavailable.",
+    };
+    view.dispatch({ effects: setRuntime.of(failure) });
+
+    expect(view.contentDOM.querySelector(".tok-definition")?.textContent).toBe("a");
+    expect(view.contentDOM.querySelector(".tok-number")?.textContent).toBe("100");
+    expect(Array.from(view.contentDOM.querySelectorAll(".tok-reference")).some((token) => token.textContent === "a")).toBe(true);
+    expect(view.contentDOM.querySelector(".tok-operator")).not.toBeNull();
     view.destroy();
   });
 
@@ -139,6 +216,39 @@ describe("CodeMirror calculation editor", () => {
     view.dispatch({ effects: setRuntime.of({ ...runtime, status: "pending" }) });
     await new Promise((resolve) => window.setTimeout(resolve, 10));
     expect(lane.querySelector("output")?.dataset.line).toBe("2");
+    view.destroy();
+  });
+
+  it("keeps the previous result while the same line is edited and pending", async () => {
+    const parent = document.body.appendChild(document.createElement("div"));
+    const lane = parent.appendChild(document.createElement("div"));
+    const view = new EditorView({
+      state: EditorState.create({ doc: "1 + 2", extensions: qaltionExtensions({ lane, onChange: () => {} }) }),
+      parent,
+    });
+    view.dispatch({ effects: setRuntime.of(runtime) });
+    view.dispatch({ changes: { from: 4, to: 5, insert: "" } });
+    view.dispatch({ effects: setRuntime.of({ ...runtime, status: "pending" }) });
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+    expect(view.state.doc.toString()).toBe("1 + ");
+    expect(lane.querySelector("output")?.textContent).toBe("3");
+    view.destroy();
+  });
+
+  it("keeps result drawing active when the internal scroller moves", async () => {
+    const parent = document.body.appendChild(document.createElement("div"));
+    const lane = parent.appendChild(document.createElement("div"));
+    const view = new EditorView({
+      state: EditorState.create({ doc: "1 + 2", extensions: qaltionExtensions({ lane, onChange: () => {} }) }),
+      parent,
+    });
+    view.dispatch({ effects: setRuntime.of(runtime) });
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    view.scrollDOM.dispatchEvent(new Event("scroll"));
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+    expect(lane.querySelector("output")?.textContent).toBe("3");
     view.destroy();
   });
 

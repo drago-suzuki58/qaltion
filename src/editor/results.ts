@@ -28,14 +28,18 @@ function drawResults(lane: HTMLElement, positions: ResultPosition[]): void {
 
 function resultLanePlugin(lane: HTMLElement) {
   return ViewPlugin.fromClass(class {
+    private readonly view: EditorView;
     private runtime: DocumentRuntime = {
       lines: [],
       variables: [],
       engine: "development-fallback",
       status: "idle",
     };
+    private readonly handleScroll = () => this.schedule(this.view);
 
     constructor(view: EditorView) {
+      this.view = view;
+      view.scrollDOM.addEventListener("scroll", this.handleScroll);
       this.schedule(view);
     }
 
@@ -79,6 +83,7 @@ function resultLanePlugin(lane: HTMLElement) {
     }
 
     destroy(): void {
+      this.view.scrollDOM.removeEventListener("scroll", this.handleScroll);
       lane.replaceChildren();
     }
 
@@ -108,12 +113,14 @@ function resultLanePlugin(lane: HTMLElement) {
       changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
         if (!survives) return;
         if (toA > fromA && toA >= from && fromA <= to) {
-          survives = false;
+          survives = fromA >= from && toA <= to && inserted.lines === 1;
           return;
         }
         if (fromA === toA && fromA >= from && fromA <= to) {
-          const prependsLines = fromA === from && inserted.toString().endsWith("\n");
-          if (!prependsLines) survives = false;
+          const insertedText = inserted.toString();
+          const movesWholeLine = fromA === from && insertedText.endsWith("\n");
+          const appendsAfterLine = fromA === to && insertedText.startsWith("\n");
+          if (inserted.lines > 1 && !movesWholeLine && !appendsAfterLine) survives = false;
         }
       });
       return survives;

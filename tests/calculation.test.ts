@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { evaluateFallbackDocument } from "../src/calculation/fallback";
 import { lexExpression } from "../src/calculation/lexer";
-import { evaluateDocument } from "../src/calculation/worker";
+import { evaluateDocument, evaluateNativeDocument, type NativeEngine } from "../src/calculation/worker";
 
 describe("calculation document semantics", () => {
   it("evaluates expressions and unit conversion from a source string", () => {
@@ -51,6 +51,30 @@ describe("calculation document semantics", () => {
     expect(runtime.lines[0].error).toBeDefined();
     expect(runtime.lines[1].error?.kind).toBe("undefined");
     expect(runtime.lines[2].error?.kind).toBe("unit");
+    expect(runtime.lines.map((line) => line.error?.message).filter(Boolean)).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/memory access out of bounds/i)]),
+    );
+  });
+
+  it("keeps independent results after an invalid assignment", () => {
+    const runtime = evaluateFallbackDocument("x = 5\na =\nx * 10");
+
+    expect(runtime.lines[0].result).toBe("5");
+    expect(runtime.lines[1].error?.message).toBe("Invalid expression");
+    expect(runtime.lines[2].result).toBe("50");
+  });
+
+  it("evaluates the editing stress scenario and recovers after repairing the assignment", () => {
+    const initial = evaluateFallbackDocument("1+1\n2+8\n4942563+2455246\na = 100\na * 100");
+    expect(initial.lines.map((line) => line.result)).toEqual(["2", "10", "7397809", "100", "10000"]);
+
+    const invalid = evaluateFallbackDocument("1+1\n2+8\n4942563+2455246\na =\na * 100");
+    expect(invalid.lines.slice(0, 3).map((line) => line.result)).toEqual(["2", "10", "7397809"]);
+    expect(invalid.lines[3].error?.message).toBe("Invalid expression");
+    expect(invalid.lines[4].error?.kind).toBe("undefined");
+
+    const repaired = evaluateFallbackDocument("1+1\n2+8\n4942563+2455246\na = 50\na * 100");
+    expect(repaired.lines.map((line) => line.result)).toEqual(["2", "10", "7397809", "50", "5000"]);
   });
 });
 
@@ -77,5 +101,65 @@ describe("calculation worker document API", () => {
       expect.objectContaining({ line: 1, from: 0, to: 5, result: "4" }),
       expect.objectContaining({ line: 2, from: 6, to: 11, result: "12" }),
     ]));
+  });
+
+  it("isolates a native trap, recreates context, and evaluates later lines", () => {
+    let generation = 0;
+    let disposed = 0;
+    const createEngine = (): NativeEngine => {
+      generation += 1;
+      return {
+        delete: () => { disposed += 1; },
+        resetContext: () => undefined,
+        evaluate: (expression) => {
+          if (generation === 1 && expression === "trap") {
+            throw new WebAssembly.RuntimeError("memory access out of bounds");
+          }
+          const results: Record<string, string> = {
+            "a = 100": "100",
+            "a * 10": "1000",
+            "5 km to m": "5000 m",
+          };
+          return { ok: true, result: results[expression] ?? "0", error: "" };
+        },
+      };
+    };
+
+    const runtime = evaluateNativeDocument("a = 100\ntrap\na * 10\n5 km to m", createEngine);
+
+    expect(generation).toBe(2);
+    expect(disposed).toBe(1);
+    expect(runtime.status).toBe("ready");
+    expect(runtime.lines.map((line) => line.result)).toEqual(["100", undefined, "1000", "5000 m"]);
+    expect(runtime.lines[1].error).toEqual({ kind: "calculation", message: "Calculation failed" });
+  });
+
+  it("discards context changes from a failed native line before continuing", () => {
+    let generation = 0;
+    let x = 0;
+    const createEngine = (): NativeEngine => {
+      generation += 1;
+      x = 0;
+      return {
+        resetContext: () => { x = 0; },
+        evaluate: (expression) => {
+          if (expression === "x = 5") {
+            x = 5;
+            return { ok: true, result: "5", error: "" };
+          }
+          if (expression === "broken") {
+            x = 999;
+            return { ok: false, result: "", error: "Syntax error near broken" };
+          }
+          return { ok: true, result: String(x * 10), error: "" };
+        },
+      };
+    };
+
+    const runtime = evaluateNativeDocument("x = 5\nbroken\nx * 10", createEngine);
+
+    expect(generation).toBe(2);
+    expect(runtime.lines[1].error).toEqual({ kind: "syntax", message: "Invalid expression" });
+    expect(runtime.lines[2].result).toBe("50");
   });
 });

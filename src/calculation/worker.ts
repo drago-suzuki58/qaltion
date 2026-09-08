@@ -1,38 +1,32 @@
-import type { CalculationRequest, CalculationResponse, DocumentRuntime, RuntimeErrorKind } from "../types";
+import type { CalculationRequest, CalculationResponse, DocumentRuntime } from "../types";
+import { invalidExpressionError, normalizeEvaluationError } from "./errors";
 import { evaluateFallbackDocument } from "./fallback";
 import { assignmentName, expressionSource, isComment, isEmpty, lexExpression, sourceLines } from "./lexer";
 
 type NativeEvaluation = { ok: boolean; result: string; error: string };
-type NativeEngine = {
+export type NativeEngine = {
   evaluate(expression: string): NativeEvaluation;
   resetContext(): void;
+  delete?(): void;
 };
 
-function nativeErrorKind(message: string): RuntimeErrorKind {
-  if (/undefined symbol/i.test(message)) return "undefined";
-  if (/unit/i.test(message)) return "unit";
-  if (/function/i.test(message)) return "function";
-  if (/parse|syntax|parenthesis/i.test(message)) return "syntax";
-  return "calculation";
-}
+type NativeEngineModule = { QaltionEngine: new () => NativeEngine };
 
 let nativeEngine: NativeEngine | undefined;
-let nativeEnginePromise: Promise<NativeEngine | undefined> | undefined;
+let nativeModulePromise: Promise<NativeEngineModule | undefined> | undefined;
 
-function loadNativeEngine(): Promise<NativeEngine | undefined> {
-  if (!nativeEnginePromise) {
-    nativeEnginePromise = (async () => {
+function loadNativeModule(): Promise<NativeEngineModule | undefined> {
+  if (!nativeModulePromise) {
+    nativeModulePromise = (async () => {
       try {
         const response = await fetch("/wasm/qaltion.js");
         if (!response.ok) throw new Error(`Failed to load native engine: ${response.status}`);
         const moduleUrl = URL.createObjectURL(await response.blob());
         try {
           const factory = (await import(/* @vite-ignore */ moduleUrl)) as {
-            default: (options?: Record<string, unknown>) => Promise<{ QaltionEngine: new () => NativeEngine }>;
+            default: (options?: Record<string, unknown>) => Promise<NativeEngineModule>;
           };
-          const module = await factory.default({ locateFile: (file: string) => `/wasm/${file}` });
-          nativeEngine = new module.QaltionEngine();
-          return nativeEngine;
+          return await factory.default({ locateFile: (file: string) => `/wasm/${file}` });
         } finally {
           URL.revokeObjectURL(moduleUrl);
         }
@@ -41,20 +35,60 @@ function loadNativeEngine(): Promise<NativeEngine | undefined> {
       }
     })();
   }
-  return nativeEnginePromise;
+  return nativeModulePromise;
 }
 
-export async function evaluateDocument(source: string): Promise<DocumentRuntime> {
-  const engine = await loadNativeEngine();
+function engineFailure(runtime: DocumentRuntime): DocumentRuntime {
+  return {
+    ...runtime,
+    status: "error",
+    failure: "The calculation engine stopped unexpectedly.",
+  };
+}
 
-  if (!engine) {
-    const runtime = evaluateFallbackDocument(source);
-    return { ...runtime, engine: "development-fallback", status: "ready" };
+function disposeEngine(engine: NativeEngine): void {
+  try {
+    engine.delete?.();
+  } catch (error) {
+    console.error("[Qaltion] The invalid native engine could not be released.", error);
   }
+}
 
-  engine.resetContext();
+function restoreContext(
+  previousEngine: NativeEngine,
+  createEngine: () => NativeEngine,
+  assignments: string[],
+): NativeEngine {
+  disposeEngine(previousEngine);
+  const engine = createEngine();
+  try {
+    engine.resetContext();
+    for (const assignment of assignments) {
+      const replay = engine.evaluate(assignment);
+      if (!replay.ok) throw new Error("Could not restore calculation context.");
+    }
+    return engine;
+  } catch (error) {
+    disposeEngine(engine);
+    throw error;
+  }
+}
+
+export function evaluateNativeDocument(source: string, createEngine: () => NativeEngine): DocumentRuntime {
   const runtime: DocumentRuntime = { lines: [], variables: [], engine: "libqalculate", status: "ready" };
   const definedNames = new Set<string>();
+  const assignments: string[] = [];
+  let engine: NativeEngine | undefined;
+
+  try {
+    engine = createEngine();
+    engine.resetContext();
+  } catch (error) {
+    if (engine) disposeEngine(engine);
+    console.error("[Qaltion] The native engine could not be initialized.", error);
+    return engineFailure(runtime);
+  }
+
   for (const line of sourceLines(source)) {
     if (isEmpty(line.text)) continue;
     const tokens = lexExpression(line.text, definedNames, line.from);
@@ -63,12 +97,44 @@ export async function evaluateDocument(source: string): Promise<DocumentRuntime>
       continue;
     }
     const expression = expressionSource(line.text);
-    const result = engine.evaluate(expression);
+    const name = assignmentName(expression);
+    if (name && expression.slice(expression.indexOf("=") + 1).trim().length === 0) {
+      runtime.lines.push({
+        line: line.line,
+        from: line.from,
+        to: line.to,
+        error: invalidExpressionError,
+        tokens,
+      });
+      continue;
+    }
+
+    let result: NativeEvaluation;
+    try {
+      result = engine.evaluate(expression);
+    } catch (error) {
+      console.error(`[Qaltion] Native evaluation trapped on line ${line.line}.`, error);
+      runtime.lines.push({
+        line: line.line,
+        from: line.from,
+        to: line.to,
+        error: normalizeEvaluationError("Calculation failed"),
+        tokens,
+      });
+      try {
+        engine = restoreContext(engine, createEngine, assignments);
+      } catch (recoveryError) {
+        console.error("[Qaltion] The native engine could not recover.", recoveryError);
+        return engineFailure(runtime);
+      }
+      continue;
+    }
+
     if (result.ok) {
       runtime.lines.push({ line: line.line, from: line.from, to: line.to, result: result.result, tokens });
-      const name = assignmentName(expression);
       if (name) {
         definedNames.add(name);
+        assignments.push(expression);
         runtime.variables.push({ name, value: result.result });
       }
     } else {
@@ -76,11 +142,39 @@ export async function evaluateDocument(source: string): Promise<DocumentRuntime>
         line: line.line,
         from: line.from,
         to: line.to,
-        error: { kind: nativeErrorKind(result.error), message: result.error },
+        error: normalizeEvaluationError(result.error),
         tokens,
       });
+      try {
+        engine = restoreContext(engine, createEngine, assignments);
+      } catch (error) {
+        console.error("[Qaltion] The native engine could not recover.", error);
+        return engineFailure(runtime);
+      }
     }
   }
+  return runtime;
+}
+
+export async function evaluateDocument(source: string): Promise<DocumentRuntime> {
+  const module = await loadNativeModule();
+
+  if (!module) {
+    const runtime = evaluateFallbackDocument(source);
+    return { ...runtime, engine: "development-fallback", status: "ready" };
+  }
+
+  let useCurrentEngine = true;
+  const runtime = evaluateNativeDocument(source, () => {
+    if (useCurrentEngine && nativeEngine) {
+      useCurrentEngine = false;
+      return nativeEngine;
+    }
+    useCurrentEngine = false;
+    nativeEngine = new module.QaltionEngine();
+    return nativeEngine;
+  });
+  if (runtime.status === "error") nativeEngine = undefined;
   return runtime;
 }
 
@@ -91,13 +185,13 @@ if (typeof self !== "undefined") self.onmessage = (event: MessageEvent<Calculati
       self.postMessage(response);
     })
     .catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : "Calculation failed.";
+      console.error("[Qaltion] The calculation request failed.", error);
       const runtime: DocumentRuntime = {
         lines: [],
         variables: [],
         engine: "development-fallback",
         status: "error",
-        failure: message,
+        failure: "The calculation engine is unavailable.",
       };
       const response: CalculationResponse = { id: event.data.id, runtime };
       self.postMessage(response);

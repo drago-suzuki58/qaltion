@@ -74,6 +74,7 @@ function NotesList({ notes, activeNoteId, onSelect, onDelete }: NotesListProps) 
 }
 
 type ScheduledSave = { timer: number; note: StoredNote };
+const EVALUATION_DEBOUNCE_MS = 120;
 
 export default function App() {
   const [notes, setNotes] = useState<StoredNote[]>([]);
@@ -89,6 +90,7 @@ export default function App() {
   const [loadError, setLoadError] = useState("");
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
   const calculationClient = useRef<CalculationClient | null>(null);
+  const evaluationSequence = useRef(0);
   const scheduledSaves = useRef(new Map<string, ScheduledSave>());
   const saveQueues = useRef(new Map<string, Promise<void>>());
   const activeContent = notes.find((note) => note.id === activeNoteId)?.content;
@@ -178,25 +180,29 @@ export default function App() {
 
   useEffect(() => {
     if (loadStatus !== "ready" || activeContent === undefined) return;
+    const sequence = ++evaluationSequence.current;
     const client = calculationClient.current;
     if (!client) {
       setRuntime(createEmptyRuntime("error", "The calculation engine could not be started."));
       return;
     }
     const noteId = activeNoteId;
-    let current = true;
     setRuntime((previous) => ({ ...previous, status: "pending", failure: undefined }));
-    void client.evaluateDocument(activeContent)
-      .then((nextRuntime) => {
-        if (current && activeNoteIdRef.current === noteId) setRuntime(nextRuntime);
-      })
-      .catch((error: unknown) => {
-        if (!current || activeNoteIdRef.current !== noteId) return;
-        const message = error instanceof Error ? error.message : "Calculation failed.";
-        setRuntime(createEmptyRuntime("error", message));
-      });
+    const timer = window.setTimeout(() => {
+      void client.evaluateDocument(activeContent)
+        .then((nextRuntime) => {
+          if (evaluationSequence.current === sequence && activeNoteIdRef.current === noteId) {
+            setRuntime(nextRuntime);
+          }
+        })
+        .catch((error: unknown) => {
+          if (evaluationSequence.current !== sequence || activeNoteIdRef.current !== noteId) return;
+          console.error("[Qaltion] Document evaluation failed.", error);
+          setRuntime(createEmptyRuntime("error", "The calculation engine is unavailable."));
+        });
+    }, EVALUATION_DEBOUNCE_MS);
     return () => {
-      current = false;
+      window.clearTimeout(timer);
     };
   }, [activeContent, activeNoteId, loadStatus]);
 
@@ -224,6 +230,8 @@ export default function App() {
   }, []);
 
   const handleEditorChange = useCallback((noteId: string, content: string) => {
+    if (notesRef.current.find((note) => note.id === noteId)?.content === content) return;
+    if (noteId === activeNoteIdRef.current) evaluationSequence.current += 1;
     updateNote(noteId, (note) => ({ ...note, content, updatedAt: Date.now() }));
   }, [updateNote]);
 
@@ -342,7 +350,6 @@ export default function App() {
               <PlusIcon />
             </button>
           </header>
-          {storageError && <div className="storage-error" role="alert">{storageError}</div>}
           <section className="document-shell" aria-label="Calculation note">
             <div className="note-heading">
               <input aria-label="Note title" value={note.title} onChange={(event) => renameNote(event.target.value)} />
@@ -354,11 +361,17 @@ export default function App() {
                     : ""}
               </div>
             </div>
-            {runtime.status === "error" && <div className="calculation-error" role="alert">{runtime.failure}</div>}
             <EditorPane key={note.id} note={note} runtime={runtime} onChange={handleEditorChange} />
           </section>
         </div>
       </main>
+
+      {(storageError || runtime.status === "error") && (
+        <div className="app-notifications">
+          {storageError && <div className="storage-error" role="alert">{storageError}</div>}
+          {runtime.status === "error" && <div className="calculation-error" role="alert">{runtime.failure}</div>}
+        </div>
+      )}
 
       <AppDialog className="notes-drawer" labelledBy="notes-drawer-title" open={drawerOpen} onClose={() => setDrawerOpen(false)}>
         <div className="drawer-heading">

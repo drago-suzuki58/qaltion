@@ -35,6 +35,7 @@ vi.mock("../src/editor/EditorPane", () => ({
       <div data-testid="note-content">{note.content}</div>
       <div data-testid="note-result">{runtime.lines[0]?.result ?? ""}</div>
       <button type="button" onClick={() => onChange(note.id, "2 + 2")}>Edit expression</button>
+      <button type="button" onClick={() => onChange(note.id, note.content)}>Report same content</button>
     </div>
   ),
 }));
@@ -111,7 +112,99 @@ describe("App note workflow", () => {
     expect(container.textContent).toContain("Note A");
   });
 
+  it("evaluates restored content after the debounce without an edit", async () => {
+    const timeoutSpy = vi.spyOn(window, "setTimeout");
+    mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
+    await act(async () => { root.render(<App />); await flush(); });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 140));
+      await flush();
+    });
+
+    expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 120);
+    expect(mocks.evaluateDocument).toHaveBeenCalledWith("1 + 1");
+    expect(container.querySelector("[data-testid='note-result']")?.textContent).toBe("result:1 + 1");
+    timeoutSpy.mockRestore();
+  });
+
+  it("debounces edits and ignores a stale evaluation response", async () => {
+    let resolveInitial!: (runtime: DocumentRuntime) => void;
+    mocks.evaluateDocument.mockImplementationOnce(() => new Promise<DocumentRuntime>((resolve) => {
+      resolveInitial = resolve;
+    }));
+    mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
+    await act(async () => { root.render(<App />); await flush(); });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 140));
+      await flush();
+    });
+
+    act(() => click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Edit expression")!));
+    await act(async () => {
+      resolveInitial({
+        lines: [{ line: 1, from: 0, to: 5, result: "stale", tokens: [] }],
+        variables: [],
+        engine: "development-fallback",
+        status: "ready",
+      });
+      await flush();
+    });
+    expect(container.querySelector("[data-testid='note-result']")?.textContent).not.toBe("stale");
+
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 140));
+      await flush();
+    });
+    expect(mocks.evaluateDocument).toHaveBeenLastCalledWith("2 + 2");
+    expect(container.querySelector("[data-testid='note-result']")?.textContent).toBe("result:2 + 2");
+  });
+
+  it("does not invalidate an evaluation when composition reports unchanged content", async () => {
+    let resolveInitial!: (runtime: DocumentRuntime) => void;
+    mocks.evaluateDocument.mockImplementationOnce(() => new Promise<DocumentRuntime>((resolve) => {
+      resolveInitial = resolve;
+    }));
+    mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
+    await act(async () => { root.render(<App />); await flush(); });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 140));
+      await flush();
+    });
+
+    act(() => click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Report same content")!));
+    await act(async () => {
+      resolveInitial({
+        lines: [{ line: 1, from: 0, to: 5, result: "2", tokens: [] }],
+        variables: [],
+        engine: "development-fallback",
+        status: "ready",
+      });
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='note-result']")?.textContent).toBe("2");
+  });
+
+  it("normalizes a global engine failure in an overlay outside the document flow", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.evaluateDocument.mockRejectedValueOnce(new WebAssembly.RuntimeError("memory access out of bounds"));
+    mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
+    await act(async () => { root.render(<App />); await flush(); });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 140));
+      await flush();
+    });
+
+    const notification = container.querySelector(".calculation-error");
+    expect(notification?.textContent).toBe("The calculation engine is unavailable.");
+    expect(notification?.textContent).not.toMatch(/memory access out of bounds/i);
+    expect(notification?.parentElement?.className).toBe("app-notifications");
+    expect(container.querySelector(".document-shell")?.contains(notification ?? null)).toBe(false);
+    consoleError.mockRestore();
+  });
+
   it("keeps edited content and recalculates it after switching notes", async () => {
+    vi.useFakeTimers();
     mocks.listNotes.mockResolvedValue([
       storedNote("a", "Note A", "1 + 1"),
       storedNote("b", "Note B", "3 + 3"),
@@ -123,9 +216,34 @@ describe("App note workflow", () => {
     });
     await act(async () => { click(container.querySelector("[aria-label='Open Note B']")!); await flush(); });
     await act(async () => { click(container.querySelector("[aria-label='Open Note A']")!); await flush(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(120); await flush(); });
 
     expect(container.querySelector("[data-testid='note-content']")?.textContent).toBe("2 + 2");
     expect(container.querySelector("[data-testid='note-result']")?.textContent).toBe("result:2 + 2");
+  });
+
+  it("clears the previous note result and evaluates the selected note without an edit", async () => {
+    mocks.listNotes.mockResolvedValue([
+      storedNote("a", "Note A", "1 + 1"),
+      storedNote("b", "Note B", "3 + 3"),
+    ]);
+    await act(async () => { root.render(<App />); await flush(); });
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 140));
+      await flush();
+    });
+    expect(container.querySelector("[data-testid='note-result']")?.textContent).toBe("result:1 + 1");
+
+    act(() => click(container.querySelector("[aria-label='Open Note B']")!));
+    expect(container.querySelector("[data-testid='note-content']")?.textContent).toBe("3 + 3");
+    expect(container.querySelector("[data-testid='note-result']")?.textContent).toBe("");
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 140));
+      await flush();
+    });
+
+    expect(mocks.evaluateDocument).toHaveBeenLastCalledWith("3 + 3");
+    expect(container.querySelector("[data-testid='note-result']")?.textContent).toBe("result:3 + 3");
   });
 
   it("keeps the latest plain text queued for saving after an immediate switch", async () => {

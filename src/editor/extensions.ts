@@ -1,7 +1,15 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { EditorState, type Extension } from "@codemirror/state";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
-import { drawSelection, EditorView, keymap, placeholder } from "@codemirror/view";
+import {
+  drawSelection,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  keymap,
+  lineNumbers,
+  placeholder,
+} from "@codemirror/view";
 import { highlightingExtension } from "./highlighting";
 import { resultsExtension } from "./results";
 
@@ -14,6 +22,9 @@ export function qaltionExtensions({ lane, onChange }: ExtensionOptions): Extensi
   let composing = false;
   return [
     history(),
+    lineNumbers(),
+    highlightActiveLine(),
+    highlightActiveLineGutter(),
     drawSelection(),
     EditorView.lineWrapping,
     highlightSelectionMatches(),

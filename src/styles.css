@@ -11,7 +11,8 @@
   --border: #d4d2c8;
   --accent: #4257a6;
   --error: #9d5149;
-  --result-lane-width: clamp(160px, 28%, 260px);
+  --editor-width: 880px;
+  --result-lane-width: 184px;
 }
 
 * {
@@ -115,8 +116,7 @@ button {
 .note-delete-button:focus-visible,
 .secondary-button:focus-visible,
 .danger-button:focus-visible,
-.note-heading input:focus-visible,
-.cm-editor.cm-focused {
+.note-heading input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -214,9 +214,8 @@ button {
   display: none;
 }
 
-.document-shell,
-.storage-error {
-  width: min(1000px, 100%);
+.document-shell {
+  width: min(var(--editor-width), 100%);
   margin-right: auto;
   margin-left: auto;
 }
@@ -255,14 +254,19 @@ button {
   font-size: 13px;
 }
 
-.storage-error {
-  margin-bottom: 12px;
+.storage-error,
+.calculation-error {
   padding: 9px 11px;
 }
 
-.calculation-error {
-  margin: 0 0 12px;
-  padding: 9px 11px;
+.app-notifications {
+  position: fixed;
+  z-index: 10;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  width: min(380px, calc(100% - 32px));
+  gap: 8px;
 }
 
 .editor-host,
@@ -274,7 +278,6 @@ button {
 
 .editor-layout {
   position: relative;
-  min-height: 440px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -282,7 +285,6 @@ button {
 }
 
 .cm-editor {
-  min-height: 438px;
   background: transparent;
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -291,24 +293,45 @@ button {
 }
 
 .cm-editor.cm-focused {
+  outline: 2px solid rgb(66 87 166 / 42%);
   outline-offset: -2px;
 }
 
 .cm-scroller {
-  min-height: 438px;
-  overflow: visible;
+  max-height: min(70vh, 700px);
+  overflow: auto;
   font-family: inherit;
   line-height: inherit;
 }
 
 .cm-content {
-  min-height: 438px;
-  padding: 18px calc(var(--result-lane-width) + 24px) 72px 20px;
+  padding: 18px calc(var(--result-lane-width) + 28px) 18px 20px;
   caret-color: var(--text);
 }
 
 .cm-line {
   padding: 0;
+}
+
+.cm-gutters {
+  border-right: 1px solid var(--border);
+  background: #f8f7f2;
+  color: #aaa89f;
+}
+
+.cm-lineNumbers .cm-gutterElement {
+  min-width: 34px;
+  padding: 0 8px 0 6px;
+  text-align: right;
+}
+
+.cm-activeLine {
+  background: rgb(66 87 166 / 5%);
+}
+
+.cm-activeLineGutter {
+  background: rgb(66 87 166 / 7%);
+  color: #777b93;
 }
 
 .cm-cursor,
@@ -322,32 +345,46 @@ button {
   background: #dce1f2 !important;
 }
 
-.cm-placeholder,
+.cm-placeholder {
+  color: #9c9b92;
+}
+
 .tok-comment {
-  color: var(--text-muted);
+  color: #85857d;
+  font-style: italic;
 }
 
 .tok-definition {
-  font-weight: 650;
+  color: #354b87;
+  font-weight: 600;
 }
 
-.tok-reference,
+.tok-reference {
+  color: #4257a6;
+}
+
+.tok-number {
+  color: #8a5a35;
+}
+
+.tok-unit,
+.tok-currency {
+  color: #607047;
+  font-weight: 550;
+}
+
 .tok-function,
-.tok-constant,
-.tok-unit,
-.tok-currency {
-  color: var(--accent);
+.tok-constant {
+  color: #76558a;
 }
 
-.tok-unit,
-.tok-currency {
-  opacity: 0.86;
+.tok-operator {
+  color: #77766f;
+  font-weight: 500;
 }
 
 .tok-undefined {
-  text-decoration: underline wavy var(--error);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
+  color: var(--error);
 }
 
 .cm-lintRange-error {
@@ -395,6 +432,7 @@ button {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 14px;
   line-height: 1.55;
+  padding-left: 8px;
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -522,7 +560,7 @@ dialog::backdrop {
 
 @media (max-width: 640px) {
   :root {
-    --result-lane-width: clamp(96px, 34vw, 132px);
+    --result-lane-width: 108px;
   }
 
   .app-shell {
@@ -571,9 +609,10 @@ dialog::backdrop {
     font-size: 22px;
   }
 
-  .storage-error {
-    width: auto;
-    margin: 12px 12px 0;
+  .app-notifications {
+    top: 68px;
+    right: 12px;
+    width: calc(100% - 24px);
   }
 
   .icon-button,
@@ -593,18 +632,18 @@ dialog::backdrop {
     grid-template-columns: minmax(0, 1fr) 44px;
   }
 
-  .editor-layout {
-    min-height: calc(100dvh - 176px);
-  }
-
-  .cm-editor,
-  .cm-scroller,
-  .cm-content {
-    min-height: calc(100dvh - 178px);
+  .cm-scroller {
+    max-height: calc(100dvh - 176px);
   }
 
   .cm-content {
-    padding: 14px calc(var(--result-lane-width) + 16px) 56px 14px;
+    padding: 14px calc(var(--result-lane-width) + 16px) 14px 14px;
+  }
+
+  .cm-lineNumbers .cm-gutterElement {
+    min-width: 30px;
+    padding-right: 6px;
+    padding-left: 4px;
   }
 
   .result-lane {

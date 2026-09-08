@@ -1,5 +1,6 @@
 import { all, create, type MathNode, type MathJsInstance, type Unit } from "mathjs";
 import type { CalculationVariable, DocumentRuntime, LineRuntime, RuntimeError } from "../types";
+import { invalidExpressionError, normalizeEvaluationError } from "./errors";
 import { assignmentName, expressionSource, isComment, isEmpty, lexExpression, sourceLines } from "./lexer";
 
 export type FallbackResult =
@@ -21,7 +22,10 @@ function createFallbackMath(): MathJsInstance {
 }
 
 function formatValue(math: MathJsInstance, value: unknown, expression: string): string {
-  if (typeof value === "number") return math.format(value, { precision: 14 });
+  if (typeof value === "number") {
+    if (Number.isSafeInteger(value)) return String(value);
+    return math.format(value, { precision: 14 });
+  }
   if (typeof value === "bigint") return value.toString();
   if (value && typeof value === "object" && "toString" in value) {
     const unit = value as Unit;
@@ -65,6 +69,7 @@ export function evaluateFallback(
   const math = createFallbackMath();
   const name = assignmentName(expression);
   const source = name ? expression.replace(/^\s*[A-Za-z_]\w*\s*=\s*/, "") : expression;
+  if (name && source.trim().length === 0) return { ok: false, error: invalidExpressionError };
 
   try {
     const value = math.evaluate(source, scope);
@@ -79,16 +84,7 @@ export function evaluateFallback(
     if (looseResult) return { ok: true, result: looseResult };
 
     const message = error instanceof Error ? error.message : "Calculation failed";
-    const kind: RuntimeError["kind"] = /unit/i.test(message)
-      ? "unit"
-      : /undefined symbol|undefined variable/i.test(message)
-        ? "undefined"
-        : /function/i.test(message)
-          ? "function"
-          : /parse|syntax|unexpected|parenthesis/i.test(message)
-            ? "syntax"
-            : "calculation";
-    return { ok: false, error: { kind, message } };
+    return { ok: false, error: normalizeEvaluationError(message) };
   }
 }
 

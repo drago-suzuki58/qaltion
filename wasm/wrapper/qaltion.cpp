@@ -55,7 +55,11 @@ class QaltionEngine {
     calculator.clearMessages();
     ParseOptions parseOptions = default_parse_options;
     parseOptions.limit_implicit_multiplication = true;
-    const MathStructure parsed = calculator.parse(expressionBeforeConversion(assignmentValue(expression)), parseOptions);
+    const std::string parsedExpression = expressionBeforeConversion(assignmentValue(expression));
+    if (withoutSpaces(parsedExpression).empty()) {
+      return {false, "", "Invalid expression"};
+    }
+    const MathStructure parsed = calculator.parse(parsedExpression, parseOptions);
     if (parsed.containsType(STRUCT_SYMBOLIC, true)) {
       return {false, "", "Undefined symbol"};
     }

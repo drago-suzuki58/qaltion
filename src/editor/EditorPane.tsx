@@ -53,18 +53,18 @@ export function EditorPane({ note, runtime, onChange }: Props) {
     const view = viewRef.current;
     if (!view) return;
     const diagnostics = runtime.status === "pending"
-      ? undefined
+      ? []
       : runtimeDiagnostics(runtime, view.state.doc.length);
     view.dispatch(
       { effects: setRuntime.of(runtime) },
-      ...(diagnostics ? [setDiagnostics(view.state, diagnostics)] : []),
+      setDiagnostics(view.state, diagnostics),
     );
   }, [runtime]);
 
   return (
     <div className="editor-host" aria-busy={runtime.status === "pending"}>
       <section className="visually-hidden" aria-label="Calculation results">
-        {runtime.status === "ready" && runtime.lines.flatMap((line) => line.result
+        {runtime.lines.flatMap((line) => line.result
           ? [<output key={line.line}>Line {line.line}: {line.result}</output>]
           : [])}
       </section>

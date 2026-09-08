@@ -21,7 +21,7 @@ const knownUnits = new Set([
 ]);
 const constants = new Set(["pi", "e", "c", "G"]);
 
-const tokenPattern = /(?:\d+(?:\.\d+)?(?:e[+-]?\d+)?|[A-Za-z_][A-Za-z_0-9]*|[+*/%^=(),-])/gi;
+const tokenPattern = /(?:\d+(?:\.\d+)?(?:e[+-]?\d+)?|[A-Za-z_][A-Za-z_0-9]*|[$€£¥]|[+*/%^=(),-])/gi;
 
 export type SourceLine = {
   line: number;
@@ -62,6 +62,8 @@ export function lexExpression(
 
     if (/^\d/.test(text)) {
       kind = "number";
+    } else if (/^[$€£¥]$/.test(text)) {
+      kind = "currency";
     } else if (text.toLowerCase() === "to") {
       kind = "operator";
     } else if (currencyCodes.has(text.toUpperCase())) {
