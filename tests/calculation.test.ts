@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { classifyLine } from "../src/calculation/classifier";
 import { evaluateFallbackDocument } from "../src/calculation/fallback";
 import { scanTokens } from "../src/calculation/lexer";
@@ -121,44 +121,48 @@ describe("calculation worker document API", () => {
     ]));
   });
 
-  it("isolates a native trap, recreates context, and evaluates later lines", () => {
+  it("marks a native trap as fatal without touching the failed engine", () => {
     let generation = 0;
     let disposed = 0;
+    const evaluate = vi.fn((expression: string) => {
+      if (expression === "trap") throw new WebAssembly.RuntimeError("memory access out of bounds");
+      return { ok: true, result: "100", error: "" };
+    });
     const createEngine = (): NativeEngine => {
       generation += 1;
       return {
         delete: () => { disposed += 1; },
         resetContext: () => undefined,
-        evaluate: (expression) => {
-          if (generation === 1 && expression === "trap") {
-            throw new WebAssembly.RuntimeError("memory access out of bounds");
-          }
-          const results: Record<string, string> = {
-            "a = 100": "100",
-            "a * 10": "1000",
-            "5 km to m": "5000 m",
-          };
-          return { ok: true, result: results[expression] ?? "0", error: "" };
-        },
+        evaluate,
       };
     };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const runtime = evaluateNativeDocument("a = 100\ntrap\na * 10\n5 km to m", createEngine);
 
-    expect(generation).toBe(2);
-    expect(disposed).toBe(1);
-    expect(runtime.status).toBe("ready");
-    expect(runtime.lines.map((line) => line.result)).toEqual(["100", undefined, "1000", "5000 m"]);
+    expect(generation).toBe(1);
+    expect(disposed).toBe(0);
+    expect(runtime).toMatchObject({ status: "error", failureKind: "native-runtime" });
+    expect(runtime.lines).toHaveLength(2);
     expect(runtime.lines[1].error).toEqual({ kind: "calculation", message: "Calculation failed" });
+    expect(evaluate).not.toHaveBeenCalledWith("a * 10");
+    expect(consoleError).toHaveBeenCalledWith("[Qaltion] Native evaluation trapped.", {
+      line: 2,
+      expression: "trap",
+      assignments: ["a = 100"],
+      error: expect.any(WebAssembly.RuntimeError),
+    });
+    consoleError.mockRestore();
   });
 
-  it("discards context changes from a failed native line before continuing", () => {
+  it("keeps the engine and evaluates later lines after a normal native error", () => {
     let generation = 0;
     let x = 0;
+    let disposed = 0;
     const createEngine = (): NativeEngine => {
       generation += 1;
-      x = 0;
       return {
+        delete: () => { disposed += 1; },
         resetContext: () => { x = 0; },
         evaluate: (expression) => {
           if (expression === "x = 5") {
@@ -166,7 +170,6 @@ describe("calculation worker document API", () => {
             return { ok: true, result: "5", error: "" };
           }
           if (expression === "broken") {
-            x = 999;
             return { ok: false, result: "", error: "Syntax error near broken" };
           }
           return { ok: true, result: String(x * 10), error: "" };
@@ -176,8 +179,59 @@ describe("calculation worker document API", () => {
 
     const runtime = evaluateNativeDocument("x = 5\nbroken\nx * 10", createEngine);
 
-    expect(generation).toBe(2);
+    expect(generation).toBe(1);
+    expect(disposed).toBe(0);
+    expect(runtime.status).toBe("ready");
     expect(runtime.lines[1].error).toEqual({ kind: "syntax", message: "Invalid expression" });
     expect(runtime.lines[2].result).toBe("50");
+  });
+
+  it("recovers across document evaluations while an assignment is being edited", () => {
+    let x: number | undefined;
+    const engine: NativeEngine = {
+      resetContext: () => { x = undefined; },
+      evaluate: (expression) => {
+        const assignment = expression.match(/^x\s*=\s*(\d+)$/);
+        if (assignment) {
+          x = Number(assignment[1]);
+          return { ok: true, result: assignment[1], error: "" };
+        }
+        if (expression === "x * 10" && x !== undefined) {
+          return { ok: true, result: String(x * 10), error: "" };
+        }
+        return { ok: false, result: "", error: "Undefined symbol" };
+      },
+    };
+    const createEngine = vi.fn(() => engine);
+
+    expect(evaluateNativeDocument("x = 5\nx * 10", createEngine).lines[1].result).toBe("50");
+    const interrupted = evaluateNativeDocument("x =\nx * 10", createEngine);
+    expect(interrupted.lines[0].error?.message).toBe("Invalid expression");
+    expect(interrupted.lines[1].error?.kind).toBe("undefined");
+    expect(evaluateNativeDocument("x = 7\nx * 10", createEngine).lines[1].result).toBe("70");
+  });
+
+  it("reuses one engine after registry loading and repeated document resets", () => {
+    let value = 0;
+    let resetCount = 0;
+    const engine: NativeEngine = {
+      getSymbolRegistry: () => JSON.stringify({
+        functions: ["sqrt"], variables: ["pi"], units: ["m"], currencies: ["USD"], prefixes: ["k"],
+      }),
+      resetContext: () => { value = 0; resetCount += 1; },
+      evaluate: (expression) => {
+        if (expression === "value = 2") value = 2;
+        return { ok: true, result: String(expression === "value * 3" ? value * 3 : value), error: "" };
+      },
+    };
+    const payload = JSON.parse(engine.getSymbolRegistry?.() ?? "{}") as Record<string, string[]>;
+    const registry = createSymbolRegistry(payload);
+
+    for (let index = 0; index < 500; index += 1) {
+      const runtime = evaluateNativeDocument("value = 2\nvalue * 3", () => engine, registry);
+      expect(runtime.lines[1].result).toBe("6");
+    }
+
+    expect(resetCount).toBe(500);
   });
 });

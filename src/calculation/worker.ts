@@ -18,6 +18,7 @@ type NativeEngineModule = { QaltionEngine: new () => NativeEngine };
 let nativeEngine: NativeEngine | undefined;
 let nativeModulePromise: Promise<NativeEngineModule | undefined> | undefined;
 let nativeRegistryPromise: Promise<SymbolRegistryPayload | undefined> | undefined;
+let nativeRuntimeFailed = false;
 
 function loadNativeModule(): Promise<NativeEngineModule | undefined> {
   if (!nativeModulePromise) {
@@ -61,6 +62,10 @@ async function loadNativeRegistry(module: NativeEngineModule): Promise<SymbolReg
         return isSymbolRegistryPayload(parsed) ? parsed : undefined;
       } catch (error) {
         console.error("[Qaltion] The native symbol registry could not be loaded.", error);
+        if (error instanceof WebAssembly.RuntimeError) {
+          nativeEngine = undefined;
+          nativeRuntimeFailed = true;
+        }
         return undefined;
       }
     })();
@@ -68,40 +73,13 @@ async function loadNativeRegistry(module: NativeEngineModule): Promise<SymbolReg
   return nativeRegistryPromise;
 }
 
-function engineFailure(runtime: DocumentRuntime): DocumentRuntime {
+function engineFailure(runtime: DocumentRuntime, failureKind?: DocumentRuntime["failureKind"]): DocumentRuntime {
   return {
     ...runtime,
     status: "error",
     failure: "The calculation engine stopped unexpectedly.",
+    failureKind,
   };
-}
-
-function disposeEngine(engine: NativeEngine): void {
-  try {
-    engine.delete?.();
-  } catch (error) {
-    console.error("[Qaltion] The invalid native engine could not be released.", error);
-  }
-}
-
-function restoreContext(
-  previousEngine: NativeEngine,
-  createEngine: () => NativeEngine,
-  assignments: string[],
-): NativeEngine {
-  disposeEngine(previousEngine);
-  const engine = createEngine();
-  try {
-    engine.resetContext();
-    for (const assignment of assignments) {
-      const replay = engine.evaluate(assignment);
-      if (!replay.ok) throw new Error("Could not restore calculation context.");
-    }
-    return engine;
-  } catch (error) {
-    disposeEngine(engine);
-    throw error;
-  }
 }
 
 export function evaluateNativeDocument(
@@ -112,15 +90,14 @@ export function evaluateNativeDocument(
   const runtime: DocumentRuntime = { lines: [], variables: [], engine: "libqalculate", status: "ready" };
   const definedNames = new Set<string>();
   const assignments: string[] = [];
-  let engine: NativeEngine | undefined;
+  let engine: NativeEngine;
 
   try {
     engine = createEngine();
     engine.resetContext();
   } catch (error) {
-    if (engine) disposeEngine(engine);
     console.error("[Qaltion] The native engine could not be initialized.", error);
-    return engineFailure(runtime);
+    return engineFailure(runtime, "native-runtime");
   }
 
   for (const line of sourceLines(source)) {
@@ -147,7 +124,12 @@ export function evaluateNativeDocument(
     try {
       result = engine.evaluate(expression);
     } catch (error) {
-      console.error(`[Qaltion] Native evaluation trapped on line ${line.line}.`, error);
+      console.error("[Qaltion] Native evaluation trapped.", {
+        line: line.line,
+        expression,
+        assignments: [...assignments],
+        error,
+      });
       const runtimeError = normalizeEvaluationError("Calculation failed");
       runtime.lines.push({
         line: line.line,
@@ -156,13 +138,7 @@ export function evaluateNativeDocument(
         error: runtimeError,
         tokens: markRuntimeUndefined(tokens, runtimeError),
       });
-      try {
-        engine = restoreContext(engine, createEngine, assignments);
-      } catch (recoveryError) {
-        console.error("[Qaltion] The native engine could not recover.", recoveryError);
-        return engineFailure(runtime);
-      }
-      continue;
+      return engineFailure(runtime, "native-runtime");
     }
 
     if (result.ok) {
@@ -181,12 +157,6 @@ export function evaluateNativeDocument(
         error: runtimeError,
         tokens: markRuntimeUndefined(tokens, runtimeError),
       });
-      try {
-        engine = restoreContext(engine, createEngine, assignments);
-      } catch (error) {
-        console.error("[Qaltion] The native engine could not recover.", error);
-        return engineFailure(runtime);
-      }
     }
   }
   return runtime;
@@ -200,19 +170,30 @@ export async function evaluateDocument(source: string): Promise<DocumentRuntime>
     return { ...runtime, engine: "development-fallback", status: "ready" };
   }
 
+  if (nativeRuntimeFailed) {
+    return engineFailure(
+      { lines: [], variables: [], engine: "libqalculate", status: "ready" },
+      "native-runtime",
+    );
+  }
+
   const payload = await loadNativeRegistry(module);
+  if (nativeRuntimeFailed) {
+    return engineFailure(
+      { lines: [], variables: [], engine: "libqalculate", status: "ready" },
+      "native-runtime",
+    );
+  }
   const registry = createSymbolRegistry(payload);
-  let useCurrentEngine = true;
   const runtime = evaluateNativeDocument(source, () => {
-    if (useCurrentEngine && nativeEngine) {
-      useCurrentEngine = false;
-      return nativeEngine;
-    }
-    useCurrentEngine = false;
+    if (nativeEngine) return nativeEngine;
     nativeEngine = new module.QaltionEngine();
     return nativeEngine;
   }, registry);
-  if (runtime.status === "error") nativeEngine = undefined;
+  if (runtime.failureKind === "native-runtime") {
+    nativeEngine = undefined;
+    nativeRuntimeFailed = true;
+  }
   return runtime;
 }
 
@@ -234,7 +215,9 @@ if (typeof self !== "undefined") self.onmessage = (event: MessageEvent<Calculati
 
   void evaluateDocument(event.data.source)
     .then((runtime) => {
-      const response: CalculationResponse = { id: event.data.id, type: "runtime", runtime };
+      const response: CalculationResponse = runtime.failureKind === "native-runtime"
+        ? { id: event.data.id, type: "runtime-failure", runtime }
+        : { id: event.data.id, type: "runtime", runtime };
       self.postMessage(response);
     })
     .catch((error: unknown) => {

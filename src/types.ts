@@ -63,6 +63,7 @@ export type DocumentRuntime = {
   engine: "libqalculate" | "development-fallback";
   status: "idle" | "pending" | "ready" | "error";
   failure?: string;
+  failureKind?: "native-runtime";
 };
 
 export type SymbolRegistryCategory =
@@ -80,4 +81,5 @@ export type CalculationRequest =
 
 export type CalculationResponse =
   | { id: number; type: "runtime"; runtime: DocumentRuntime }
+  | { id: number; type: "runtime-failure"; runtime: DocumentRuntime }
   | { id: number; type: "symbol-registry"; registry?: SymbolRegistryPayload };

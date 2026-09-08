@@ -5,29 +5,57 @@ type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timeout: number;
+  message: CalculationRequest;
+  recoveryAttempts: number;
 };
 
 type CalculationMessage =
   | { type: "evaluate"; source: string }
   | { type: "get-symbol-registry" };
 
+function createCalculationWorker(): Worker {
+  return new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+}
+
 export class CalculationClient {
-  private readonly worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+  private worker: Worker;
   private sequence = 0;
   private readonly pending = new Map<number, PendingRequest>();
   private symbolRegistryPromise: Promise<QalculateSymbolRegistry | undefined> | undefined;
+  private disposed = false;
 
-  constructor() {
-    this.worker.onmessage = (event: MessageEvent<CalculationResponse>) => {
-      const request = this.pending.get(event.data.id);
+  constructor(private readonly workerFactory: () => Worker = createCalculationWorker) {
+    this.worker = this.startWorker();
+  }
+
+  private startWorker(): Worker {
+    const worker = this.workerFactory();
+    worker.onmessage = (event: MessageEvent<CalculationResponse>) => {
+      if (this.worker !== worker) return;
+      const response = event.data;
+      const request = this.pending.get(response.id);
       if (!request) return;
+
+      if (response.type === "runtime-failure" && request.recoveryAttempts === 0) {
+        this.restartWorker();
+        return;
+      }
+
       window.clearTimeout(request.timeout);
-      this.pending.delete(event.data.id);
-      if (event.data.type === "runtime") request.resolve(event.data.runtime);
-      else request.resolve(symbolRegistryFromPayload(event.data.registry));
+      this.pending.delete(response.id);
+      if (response.type === "runtime" || response.type === "runtime-failure") {
+        request.resolve(response.runtime);
+      } else {
+        request.resolve(symbolRegistryFromPayload(response.registry));
+      }
     };
-    this.worker.onerror = () => this.rejectPending(new Error("The calculation worker stopped unexpectedly."));
-    this.worker.onmessageerror = () => this.rejectPending(new Error("The calculation worker returned an invalid response."));
+    worker.onerror = () => {
+      if (this.worker === worker) this.handleWorkerFailure(new Error("The calculation worker stopped unexpectedly."));
+    };
+    worker.onmessageerror = () => {
+      if (this.worker === worker) this.handleWorkerFailure(new Error("The calculation worker returned an invalid response."));
+    };
+    return worker;
   }
 
   evaluateDocument(source: string): Promise<DocumentRuntime> {
@@ -42,8 +70,31 @@ export class CalculationClient {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.rejectPending(new Error("The calculation worker was disposed."));
     this.worker.terminate();
+  }
+
+  private handleWorkerFailure(error: Error): void {
+    const canRecover = [...this.pending.values()].every((request) => request.recoveryAttempts === 0);
+    if (!this.disposed && this.pending.size > 0 && canRecover) {
+      this.restartWorker();
+      return;
+    }
+    this.rejectPending(error);
+  }
+
+  private restartWorker(): void {
+    const previousWorker = this.worker;
+    previousWorker.onmessage = null;
+    previousWorker.onerror = null;
+    previousWorker.onmessageerror = null;
+    previousWorker.terminate();
+    this.worker = this.startWorker();
+    for (const request of this.pending.values()) {
+      request.recoveryAttempts += 1;
+      this.worker.postMessage(request.message);
+    }
   }
 
   private rejectPending(error: Error): void {
@@ -61,10 +112,16 @@ export class CalculationClient {
         this.pending.delete(id);
         reject(new Error("Calculation timed out."));
       }, 30_000);
-      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timeout });
       const message: CalculationRequest = request.type === "evaluate"
         ? { id, type: request.type, source: request.source }
         : { id, type: request.type };
+      this.pending.set(id, {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+        timeout,
+        message,
+        recoveryAttempts: 0,
+      });
       this.worker.postMessage(message);
     });
   }

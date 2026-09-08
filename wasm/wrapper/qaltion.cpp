@@ -11,8 +11,10 @@
 #include <libqalculate/Unit.h>
 #include <libqalculate/Variable.h>
 
+#include <algorithm>
 #include <cctype>
 #include <string>
+#include <vector>
 
 using namespace emscripten;
 
@@ -94,16 +96,29 @@ void appendPrefixCategory(std::string& output, Calculator& calculator) {
   output += "]";
 }
 
-std::string assignmentValue(const std::string& expression) {
+size_t assignmentSeparator(const std::string& expression) {
   size_t index = 0;
   while (index < expression.size() && std::isspace(static_cast<unsigned char>(expression[index]))) index++;
-  if (index == expression.size() || (!std::isalpha(static_cast<unsigned char>(expression[index])) && expression[index] != '_')) return expression;
+  if (index == expression.size() || (!std::isalpha(static_cast<unsigned char>(expression[index])) && expression[index] != '_')) return std::string::npos;
   index++;
   while (index < expression.size() && (std::isalnum(static_cast<unsigned char>(expression[index])) || expression[index] == '_')) index++;
   while (index < expression.size() && std::isspace(static_cast<unsigned char>(expression[index]))) index++;
   if (index >= expression.size() || expression[index] != '=' ||
-      (index + 1 < expression.size() && expression[index + 1] == '=')) return expression;
-  return expression.substr(index + 1);
+      (index + 1 < expression.size() && expression[index + 1] == '=')) return std::string::npos;
+  return index;
+}
+
+std::string assignmentValue(const std::string& expression) {
+  const size_t separator = assignmentSeparator(expression);
+  return separator == std::string::npos ? expression : expression.substr(separator + 1);
+}
+
+std::string assignmentName(const std::string& expression) {
+  const size_t separator = assignmentSeparator(expression);
+  if (separator == std::string::npos) return "";
+  const size_t start = expression.find_first_not_of(" \t\n\r\f\v");
+  const size_t end = expression.find_last_not_of(" \t\n\r\f\v", separator - 1);
+  return expression.substr(start, end - start + 1);
 }
 
 std::string expressionBeforeConversion(const std::string& expression) {
@@ -154,6 +169,10 @@ class QaltionEngine {
       if (parsed.isAddition() && parsed.containsType(STRUCT_UNIT, true) && withoutSpaces(expression) == withoutSpaces(result)) {
         return {false, "", "Incompatible units"};
       }
+      const std::string name = assignmentName(expression);
+      if (!name.empty() && std::find(contextVariables.begin(), contextVariables.end(), name) == contextVariables.end()) {
+        contextVariables.push_back(name);
+      }
       return {true, result, ""};
     }
 
@@ -165,9 +184,12 @@ class QaltionEngine {
   }
 
   void resetContext() {
-    calculator.reset();
-    calculator.loadExchangeRates();
-    calculator.loadGlobalDefinitions();
+    for (const std::string& name : contextVariables) {
+      Variable* variable = calculator.getActiveVariable(name, true);
+      if (variable && variable->isLocal() && !variable->isBuiltin()) variable->destroy();
+    }
+    contextVariables.clear();
+    calculator.clearMessages();
   }
 
   std::string getSymbolRegistry() {
@@ -187,6 +209,7 @@ class QaltionEngine {
 
   private:
   Calculator calculator;
+  std::vector<std::string> contextVariables;
 };
 
 EMSCRIPTEN_BINDINGS(qaltion_bridge) {
