@@ -101,10 +101,12 @@ $(PREFIX)/lib/libxml2.a: $(LIBXML_SOURCE)
 $(PREFIX)/lib/libqalculate.a: $(QALCULATE_SOURCE) $(PREFIX)/lib/libgmp.a $(PREFIX)/lib/libmpfr.a $(PREFIX)/lib/libxml2.a
 	mkdir -p "$(BUILDS)/libqalculate"
 	cd "$(BUILDS)/libqalculate"
+	# libqalculate 5.12.0 reuses this Autoconf cache value for the native build compiler.
 	CPPFLAGS="-I$(PREFIX)/include -I$(PREFIX)/include/libxml2" \
 	LDFLAGS="-L$(PREFIX)/lib" \
 	LIBXML_CFLAGS="-I$(PREFIX)/include/libxml2" \
 	LIBXML_LIBS="-L$(PREFIX)/lib -lxml2" \
+	ac_cv_prog_cc_c23=-std=gnu2x \
 	"$(EMCONFIGURE)" "$(QALCULATE_SOURCE)/configure" --host wasm32-unknown-emscripten --prefix="$(PREFIX)" \
 	--without-libcurl --without-icu --disable-textport --disable-nls \
 	--without-gnuplot-call --enable-compiled-definitions
