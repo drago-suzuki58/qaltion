@@ -21,14 +21,19 @@ export type RuntimeError = {
 
 export type SemanticTokenKind =
   | "comment"
+  | "string"
   | "definition"
   | "reference"
+  | "identifier"
   | "number"
   | "unit"
   | "currency"
+  | "prefix"
   | "function"
-  | "constant"
+  | "builtin-variable"
+  | "keyword"
   | "operator"
+  | "punctuation"
   | "undefined";
 
 export type SemanticToken = {
@@ -60,12 +65,19 @@ export type DocumentRuntime = {
   failure?: string;
 };
 
-export type CalculationRequest = {
-  id: number;
-  source: string;
-};
+export type SymbolRegistryCategory =
+  | "functions"
+  | "variables"
+  | "units"
+  | "currencies"
+  | "prefixes";
 
-export type CalculationResponse = {
-  id: number;
-  runtime: DocumentRuntime;
-};
+export type SymbolRegistryPayload = Record<SymbolRegistryCategory, string[]>;
+
+export type CalculationRequest =
+  | { id: number; type: "evaluate"; source: string }
+  | { id: number; type: "get-symbol-registry" };
+
+export type CalculationResponse =
+  | { id: number; type: "runtime"; runtime: DocumentRuntime }
+  | { id: number; type: "symbol-registry"; registry?: SymbolRegistryPayload };

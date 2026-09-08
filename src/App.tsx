@@ -5,6 +5,7 @@ import { EditorPane } from "./editor/EditorPane";
 import { deleteNote, listNotes, saveNote } from "./storage/database";
 import { createSampleNote } from "./storage/sample";
 import type { DocumentRuntime, StoredNote } from "./types";
+import type { QalculateSymbolRegistry } from "./calculation/registry";
 
 function createEmptyRuntime(status: DocumentRuntime["status"] = "idle", failure?: string): DocumentRuntime {
   return { lines: [], variables: [], engine: "development-fallback", status, failure };
@@ -83,6 +84,7 @@ export default function App() {
   const activeNoteIdRef = useRef("");
   const [loadStatus, setLoadStatus] = useState<"loading" | "ready">("loading");
   const [runtime, setRuntime] = useState<DocumentRuntime>(() => createEmptyRuntime());
+  const [symbolRegistry, setSymbolRegistry] = useState<QalculateSymbolRegistry>();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string>();
   const [deleteStatus, setDeleteStatus] = useState<"idle" | "deleting">("idle");
@@ -151,6 +153,13 @@ export default function App() {
     let current = true;
     try {
       calculationClient.current = new CalculationClient();
+      const client = calculationClient.current;
+      const registryPromise = client.getSymbolRegistry?.();
+      if (registryPromise) {
+        void registryPromise.then((registry) => {
+          if (current && registry) setSymbolRegistry(registry);
+        });
+      }
     } catch {
       calculationClient.current = null;
     }
@@ -361,7 +370,7 @@ export default function App() {
                     : ""}
               </div>
             </div>
-            <EditorPane key={note.id} note={note} runtime={runtime} onChange={handleEditorChange} />
+           <EditorPane key={note.id} note={note} runtime={runtime} registry={symbolRegistry} onChange={handleEditorChange} />
           </section>
         </div>
       </main>

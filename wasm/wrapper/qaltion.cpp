@@ -6,11 +6,93 @@
  */
 #include <emscripten/bind.h>
 #include <libqalculate/Calculator.h>
+#include <libqalculate/Function.h>
+#include <libqalculate/Prefix.h>
+#include <libqalculate/Unit.h>
+#include <libqalculate/Variable.h>
 
 #include <cctype>
 #include <string>
 
 using namespace emscripten;
+
+std::string jsonString(const std::string& value) {
+  const char hex[] = "0123456789abcdef";
+  std::string escaped = "\"";
+  for (const unsigned char character : value) {
+    if (character == '\\') escaped += "\\\\";
+    else if (character == '"') escaped += "\\\"";
+    else if (character == '\b') escaped += "\\b";
+    else if (character == '\f') escaped += "\\f";
+    else if (character == '\n') escaped += "\\n";
+    else if (character == '\r') escaped += "\\r";
+    else if (character == '\t') escaped += "\\t";
+    else if (character < 0x20) {
+      escaped += "\\u00";
+      escaped += hex[character >> 4];
+      escaped += hex[character & 0x0f];
+    } else {
+      escaped += static_cast<char>(character);
+    }
+  }
+  escaped += "\"";
+  return escaped;
+}
+
+void appendName(std::string& output, bool& first, const std::string& name) {
+  if (name.empty()) return;
+  if (!first) output += ",";
+  output += jsonString(name);
+  first = false;
+}
+
+template <typename Getter>
+void appendExpressionCategory(std::string& output, Getter getter) {
+  output += "[";
+  bool first = true;
+  for (size_t itemIndex = 0;; itemIndex++) {
+    const ExpressionItem* item = getter(itemIndex);
+    if (!item) break;
+    if (!item->isActive()) continue;
+    for (size_t nameIndex = 1;; nameIndex++) {
+      const ExpressionName& name = item->getName(nameIndex);
+      if (name.name.empty()) break;
+      if (!name.completion_only) appendName(output, first, name.name);
+    }
+  }
+  output += "]";
+}
+
+void appendUnitCategory(std::string& output, Calculator& calculator, bool currencies) {
+  output += "[";
+  bool first = true;
+  for (size_t itemIndex = 0;; itemIndex++) {
+    Unit* item = calculator.getUnit(itemIndex);
+    if (!item) break;
+    if (!item->isActive() || item->isCurrency() != currencies) continue;
+    for (size_t nameIndex = 1;; nameIndex++) {
+      const ExpressionName& name = item->getName(nameIndex);
+      if (name.name.empty()) break;
+      if (!name.completion_only) appendName(output, first, name.name);
+    }
+  }
+  output += "]";
+}
+
+void appendPrefixCategory(std::string& output, Calculator& calculator) {
+  output += "[";
+  bool first = true;
+  for (size_t itemIndex = 0;; itemIndex++) {
+    Prefix* item = calculator.getPrefix(itemIndex);
+    if (!item) break;
+    for (size_t nameIndex = 1;; nameIndex++) {
+      const ExpressionName& name = item->getName(nameIndex);
+      if (name.name.empty()) break;
+      if (!name.completion_only) appendName(output, first, name.name);
+    }
+  }
+  output += "]";
+}
 
 std::string assignmentValue(const std::string& expression) {
   size_t index = 0;
@@ -88,6 +170,21 @@ class QaltionEngine {
     calculator.loadGlobalDefinitions();
   }
 
+  std::string getSymbolRegistry() {
+    std::string registry = "{\"functions\":";
+    appendExpressionCategory(registry, [this](size_t index) { return calculator.getFunction(index); });
+    registry += ",\"variables\":";
+    appendExpressionCategory(registry, [this](size_t index) { return calculator.getVariable(index); });
+    registry += ",\"units\":";
+    appendUnitCategory(registry, calculator, false);
+    registry += ",\"currencies\":";
+    appendUnitCategory(registry, calculator, true);
+    registry += ",\"prefixes\":";
+    appendPrefixCategory(registry, calculator);
+    registry += "}";
+    return registry;
+  }
+
   private:
   Calculator calculator;
 };
@@ -101,5 +198,6 @@ EMSCRIPTEN_BINDINGS(qaltion_bridge) {
   class_<QaltionEngine>("QaltionEngine")
       .constructor<>()
       .function("evaluate", &QaltionEngine::evaluate)
-      .function("resetContext", &QaltionEngine::resetContext);
+      .function("resetContext", &QaltionEngine::resetContext)
+      .function("getSymbolRegistry", &QaltionEngine::getSymbolRegistry);
 }

@@ -12,13 +12,15 @@ import {
 } from "@codemirror/view";
 import { highlightingExtension } from "./highlighting";
 import { resultsExtension } from "./results";
+import type { QalculateSymbolRegistry } from "../calculation/registry";
 
 type ExtensionOptions = {
   lane: HTMLElement;
+  registry?: QalculateSymbolRegistry;
   onChange: (source: string) => void;
 };
 
-export function qaltionExtensions({ lane, onChange }: ExtensionOptions): Extension[] {
+export function qaltionExtensions({ lane, registry, onChange }: ExtensionOptions): Extension[] {
   let composing = false;
   return [
     history(),
@@ -52,7 +54,7 @@ export function qaltionExtensions({ lane, onChange }: ExtensionOptions): Extensi
         return false;
       },
     }),
-    highlightingExtension,
+    highlightingExtension(registry),
     resultsExtension(lane),
   ];
 }

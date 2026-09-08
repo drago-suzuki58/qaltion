@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { classifyLine } from "../src/calculation/classifier";
 import { evaluateFallbackDocument } from "../src/calculation/fallback";
-import { lexExpression } from "../src/calculation/lexer";
+import { scanTokens } from "../src/calculation/lexer";
+import { createSymbolRegistry } from "../src/calculation/registry";
 import { evaluateDocument, evaluateNativeDocument, type NativeEngine } from "../src/calculation/worker";
 
 describe("calculation document semantics", () => {
@@ -79,8 +81,24 @@ describe("calculation document semantics", () => {
 });
 
 describe("Qaltion lexer", () => {
-  it("returns document ranges and semantic categories without changing source", () => {
-    const tokens = lexExpression("server = 1200 JPY / month", new Set(["server"]), 10);
+  it("returns document ranges from the scanner without semantic knowledge", () => {
+    const tokens = scanTokens("server = 1200 JPY / month", 10);
+
+    expect(tokens).toEqual(expect.arrayContaining([
+      { text: "server", kind: "identifier", from: 10, to: 16 },
+      { text: "1200", kind: "number", from: 19, to: 23 },
+      { text: "JPY", kind: "identifier", from: 24, to: 27 },
+      { text: "month", kind: "identifier", from: 30, to: 35 },
+    ]));
+  });
+
+  it("classifies the same ranges with a mock libqalculate registry", () => {
+    const tokens = classifyLine(
+      "server = 1200 JPY / month",
+      new Set<string>(),
+      10,
+      createSymbolRegistry({ currencies: ["JPY"], units: ["month"] }),
+    );
 
     expect(tokens).toEqual(expect.arrayContaining([
       expect.objectContaining({ text: "server", kind: "definition", from: 10, to: 16 }),

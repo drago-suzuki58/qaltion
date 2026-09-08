@@ -9,7 +9,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { runtimeDiagnostics } from "../src/editor/diagnostics";
 import { EditorPane } from "../src/editor/EditorPane";
 import { qaltionExtensions } from "../src/editor/extensions";
-import { semanticDecorationRanges, setRuntime } from "../src/editor/highlighting";
+import { semanticDecorationRanges, setRuntime, setSymbolRegistry } from "../src/editor/highlighting";
+import { createSymbolRegistry } from "../src/calculation/registry";
 import type { DocumentRuntime, StoredNote } from "../src/types";
 
 const runtime: DocumentRuntime = {
@@ -28,6 +29,13 @@ const runtime: DocumentRuntime = {
   engine: "development-fallback",
   status: "ready",
 };
+
+const syntaxRegistry = createSymbolRegistry({
+  functions: ["sin"],
+  variables: ["pi"],
+  units: ["m", "month"],
+  currencies: ["JPY", "$"],
+});
 
 beforeAll(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -83,7 +91,7 @@ describe("CodeMirror calculation editor", () => {
     const view = new EditorView({
       state: EditorState.create({
         doc: "# Monthly cost\nrate = sin(pi) + 1200 JPY / month\nrate + $5",
-        extensions: qaltionExtensions({ lane, onChange: () => {} }),
+        extensions: qaltionExtensions({ lane, registry: syntaxRegistry, onChange: () => {} }),
       }),
       parent,
     });
@@ -101,7 +109,7 @@ describe("CodeMirror calculation editor", () => {
     expect(parent.querySelector(".tok-unit")?.textContent).toBe("month");
     expect(parent.querySelector(".tok-definition")?.textContent).toBe("rate");
     expect(parent.querySelector(".tok-function")?.textContent).toBe("sin");
-    expect(parent.querySelector(".tok-constant")?.textContent).toBe("pi");
+    expect(parent.querySelector(".tok-builtin-variable")?.textContent).toBe("pi");
     expect(Array.from(parent.querySelectorAll(".tok-reference")).some((token) => token.textContent === "rate")).toBe(true);
     expect(Array.from(parent.querySelectorAll(".tok-currency")).some((token) => token.textContent === "$")).toBe(true);
     view.destroy();
@@ -120,6 +128,27 @@ describe("CodeMirror calculation editor", () => {
 
     expect(view.state.doc.toString()).toBe("2 + 2");
     expect(onChange).toHaveBeenLastCalledWith("2 + 2");
+    view.destroy();
+  });
+
+  it("reclassifies locally when the registry arrives without recreating the document", () => {
+    const parent = document.body.appendChild(document.createElement("div"));
+    const lane = parent.appendChild(document.createElement("div"));
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: "sin(pi) + 5 m",
+        extensions: qaltionExtensions({ lane, onChange: () => {} }),
+      }),
+      parent,
+    });
+
+    expect(parent.querySelector(".tok-function")).toBeNull();
+    view.dispatch({ effects: setSymbolRegistry.of(syntaxRegistry) });
+
+    expect(view.state.doc.toString()).toBe("sin(pi) + 5 m");
+    expect(parent.querySelector(".tok-function")?.textContent).toBe("sin");
+    expect(parent.querySelector(".tok-builtin-variable")?.textContent).toBe("pi");
+    expect(parent.querySelector(".tok-unit")?.textContent).toBe("m");
     view.destroy();
   });
 

@@ -350,37 +350,67 @@ button {
 }
 
 .tok-comment {
-  color: #85857d;
+  color: #88877f;
   font-style: italic;
 }
 
 .tok-definition {
-  color: #354b87;
+  color: #344e89;
   font-weight: 600;
 }
 
 .tok-reference {
-  color: #4257a6;
+  color: #5571aa;
 }
 
 .tok-number {
-  color: #8a5a35;
+  color: #9a5d36;
 }
 
-.tok-unit,
-.tok-currency {
-  color: #607047;
+.tok-string {
+  color: #8d704f;
+}
+
+.tok-unit {
+  color: #5f744f;
   font-weight: 550;
 }
 
-.tok-function,
-.tok-constant {
-  color: #76558a;
+.tok-prefix {
+  color: #71805b;
+  font-weight: 550;
+}
+
+.tok-currency {
+  color: #987044;
+  font-weight: 550;
+}
+
+.tok-function {
+  color: #70518a;
+}
+
+.tok-builtin-variable {
+  color: #896578;
+}
+
+.tok-keyword {
+  color: #8a6250;
+  font-weight: 550;
 }
 
 .tok-operator {
-  color: #77766f;
+  color: #6f7882;
   font-weight: 500;
+}
+
+.tok-punctuation {
+  color: #8a8177;
+  font-weight: 500;
+}
+
+.tok-identifier {
+  color: inherit;
 }
 
 .tok-undefined {

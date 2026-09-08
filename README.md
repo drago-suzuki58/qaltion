@@ -24,11 +24,23 @@ React
 ```
 
 - `src/editor/` configures only the CodeMirror extensions Qaltion needs, exact-range semantic decorations, diagnostics, and the non-editable result lane.
-- `src/calculation/` owns the Worker protocol, logical-line evaluation, semantic lexer, and development fallback.
+- `src/calculation/` owns the Worker protocol, logical-line evaluation, lexical scanner, symbol classifier, and development fallback.
 - `src/storage/` stores `StoredNote.content` in IndexedDB. Database version 2 performs a one-time best-effort conversion of earlier BlockNote PoC records to plain text.
 - `wasm/` contains the existing libqalculate C++ bridge and reproducible Emscripten build.
 
 The Worker bridge is used even when a native build is absent. The mathjs fallback is isolated in `src/calculation/fallback.ts`; generated `public/wasm/qaltion.js` and `qaltion.wasm` take precedence automatically.
+
+## Syntax highlighting
+
+Highlighting is split into three responsibilities:
+
+```text
+local lexical scanner
+  + libqalculate symbol registry (loaded once through the Worker)
+  + runtime diagnostics and undefined overlay
+```
+
+The scanner only produces source ranges. The registry classifies libqalculate functions, variables, units, currencies, prefixes, and aliases. Unknown identifiers stay neutral while typing; actual evaluation errors remain runtime diagnostics.
 
 ## Development
 

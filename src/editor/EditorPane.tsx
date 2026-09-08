@@ -3,17 +3,19 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import type { DocumentRuntime, StoredNote } from "../types";
+import type { QalculateSymbolRegistry } from "../calculation/registry";
 import { runtimeDiagnostics } from "./diagnostics";
 import { qaltionExtensions } from "./extensions";
-import { setRuntime } from "./highlighting";
+import { setRuntime, setSymbolRegistry } from "./highlighting";
 
 type Props = {
   note: StoredNote;
   runtime: DocumentRuntime;
+  registry?: QalculateSymbolRegistry;
   onChange: (noteId: string, content: string) => void;
 };
 
-export function EditorPane({ note, runtime, onChange }: Props) {
+export function EditorPane({ note, runtime, registry, onChange }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const laneRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView>(null);
@@ -28,6 +30,7 @@ export function EditorPane({ note, runtime, onChange }: Props) {
         doc: note.content,
         extensions: qaltionExtensions({
           lane,
+          registry,
           onChange: (content) => onChange(note.id, content),
         }),
       }),
@@ -60,6 +63,12 @@ export function EditorPane({ note, runtime, onChange }: Props) {
       setDiagnostics(view.state, diagnostics),
     );
   }, [runtime]);
+
+  useLayoutEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({ effects: setSymbolRegistry.of(registry) });
+  }, [registry]);
 
   return (
     <div className="editor-host" aria-busy={runtime.status === "pending"}>

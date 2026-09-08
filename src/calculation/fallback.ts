@@ -1,7 +1,8 @@
 import { all, create, type MathNode, type MathJsInstance, type Unit } from "mathjs";
 import type { CalculationVariable, DocumentRuntime, LineRuntime, RuntimeError } from "../types";
+import { classifyLine, markRuntimeUndefined } from "./classifier";
 import { invalidExpressionError, normalizeEvaluationError } from "./errors";
-import { assignmentName, expressionSource, isComment, isEmpty, lexExpression, sourceLines } from "./lexer";
+import { assignmentName, expressionSource, isComment, isEmpty, sourceLines } from "./lexer";
 
 export type FallbackResult =
   | { ok: true; result: string; variable?: CalculationVariable }
@@ -98,7 +99,7 @@ export function evaluateFallbackDocument(
 
   for (const line of sourceLines(source)) {
     if (isEmpty(line.text)) continue;
-    const tokens = lexExpression(line.text, definedNames, line.from);
+    const tokens = classifyLine(line.text, definedNames, line.from);
     if (isComment(line.text)) {
       lines.push({ line: line.line, from: line.from, to: line.to, tokens });
       continue;
@@ -113,7 +114,7 @@ export function evaluateFallbackDocument(
         variables.push(outcome.variable);
       }
     } else {
-      lines.push({ line: line.line, from: line.from, to: line.to, error: outcome.error, tokens });
+      lines.push({ line: line.line, from: line.from, to: line.to, error: outcome.error, tokens: markRuntimeUndefined(tokens, outcome.error) });
     }
   }
 
