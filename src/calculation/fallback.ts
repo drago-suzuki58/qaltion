@@ -1,6 +1,6 @@
 import { all, create, type MathNode, type MathJsInstance, type Unit } from "mathjs";
-import type { CalculationVariable, RuntimeBlock, RuntimeError } from "../types";
-import { assignmentName, isComment, isEmpty, lexExpression } from "./lexer";
+import type { CalculationVariable, DocumentRuntime, LineRuntime, RuntimeError } from "../types";
+import { assignmentName, expressionSource, isComment, isEmpty, lexExpression, sourceLines } from "./lexer";
 
 export type FallbackResult =
   | { ok: true; result: string; variable?: CalculationVariable }
@@ -93,44 +93,35 @@ export function evaluateFallback(
 }
 
 export function evaluateFallbackDocument(
-  items: Array<{ id: string; type: string; text: string; props?: Record<string, unknown> }>,
-): {
-  blocks: Record<string, RuntimeBlock>;
-  variables: CalculationVariable[];
-} {
+  source: string,
+): Omit<DocumentRuntime, "engine" | "status"> {
   const scope: Scope = {};
   const definedNames = new Set<string>();
   const variables: CalculationVariable[] = [];
-  const blocks: Record<string, RuntimeBlock> = {};
+  const lines: LineRuntime[] = [];
 
-  for (const item of items) {
-    if (item.type === "variables") {
-      blocks[item.id] = { variables: [...variables], tokens: [] };
-      continue;
-    }
-    if (item.type !== "paragraph" && !(item.type === "result" && item.props?.mode === "dynamic")) {
-      continue;
-    }
-    if (isEmpty(item.text)) continue;
-    if (isComment(item.text)) {
-      blocks[item.id] = { tokens: [{ text: item.text, from: 0, to: item.text.length, kind: "comment" }] };
+  for (const line of sourceLines(source)) {
+    if (isEmpty(line.text)) continue;
+    const tokens = lexExpression(line.text, definedNames, line.from);
+    if (isComment(line.text)) {
+      lines.push({ line: line.line, from: line.from, to: line.to, tokens });
       continue;
     }
 
-    const tokens = lexExpression(item.text, definedNames);
-    const outcome = evaluateFallback(item.text, scope);
+    const expression = expressionSource(line.text);
+    const outcome = evaluateFallback(expression, scope);
     if (outcome.ok) {
-      blocks[item.id] = { result: outcome.result, tokens };
+      lines.push({ line: line.line, from: line.from, to: line.to, result: outcome.result, tokens });
       if (outcome.variable) {
         definedNames.add(outcome.variable.name);
         variables.push(outcome.variable);
       }
     } else {
-      blocks[item.id] = { error: outcome.error, tokens };
+      lines.push({ line: line.line, from: line.from, to: line.to, error: outcome.error, tokens });
     }
   }
 
-  return { blocks, variables };
+  return { lines, variables };
 }
 
 export function parseForTests(expression: string): MathNode {

@@ -1,15 +1,7 @@
-export type AppBlock = {
-  id: string;
-  type: string;
-  props: Record<string, boolean | number | string>;
-  content: unknown;
-  children: AppBlock[];
-};
-
 export type StoredNote = {
   id: string;
   title: string;
-  blocks: unknown[];
+  content: string;
   createdAt: number;
   updatedAt: number;
   lastOpenedAt: number;
@@ -46,10 +38,12 @@ export type SemanticToken = {
   kind: SemanticTokenKind;
 };
 
-export type RuntimeBlock = {
+export type LineRuntime = {
+  line: number;
+  from: number;
+  to: number;
   result?: string;
   error?: RuntimeError;
-  variables?: CalculationVariable[];
   tokens: SemanticToken[];
 };
 
@@ -59,9 +53,19 @@ export type CalculationVariable = {
 };
 
 export type DocumentRuntime = {
-  blocks: Record<string, RuntimeBlock>;
+  lines: LineRuntime[];
   variables: CalculationVariable[];
   engine: "libqalculate" | "development-fallback";
   status: "idle" | "pending" | "ready" | "error";
   failure?: string;
+};
+
+export type CalculationRequest = {
+  id: number;
+  source: string;
+};
+
+export type CalculationResponse = {
+  id: number;
+  runtime: DocumentRuntime;
 };

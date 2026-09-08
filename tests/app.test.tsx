@@ -1,23 +1,15 @@
 /** @vitest-environment jsdom */
 
-import { act, type ReactNode } from "react";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppBlock, DocumentRuntime, StoredNote } from "../src/types";
+import type { DocumentRuntime, StoredNote } from "../src/types";
 
 const mocks = vi.hoisted(() => ({
   deleteNote: vi.fn(),
   evaluateDocument: vi.fn(),
   listNotes: vi.fn(),
   saveNote: vi.fn(),
-}));
-
-vi.mock("@mantine/core", () => ({
-  Drawer: ({ opened, children, title }: { opened: boolean; children: ReactNode; title: ReactNode }) =>
-    opened ? <aside><h2>{title}</h2>{children}</aside> : null,
-  Loader: () => <svg data-testid="loader" />,
-  Modal: ({ opened, children, title }: { opened: boolean; children: ReactNode; title: ReactNode }) =>
-    opened ? <section role="dialog" aria-label={String(title)}>{children}</section> : null,
 }));
 
 vi.mock("../src/storage/database", () => ({
@@ -33,49 +25,26 @@ vi.mock("../src/calculation/client", () => ({
   },
 }));
 
-vi.mock("../src/editor/EditorPane", async () => {
-  const { useEffect } = await import("react");
-  return {
-    EditorPane: ({ note, runtime, onChange }: {
-      note: StoredNote;
-      runtime: DocumentRuntime;
-      onChange: (noteId: string, blocks: AppBlock[]) => void;
-    }) => {
-      useEffect(() => {
-        onChange(note.id, note.blocks as AppBlock[]);
-      }, [note.id, onChange]);
-      const firstBlock = note.blocks[0] as AppBlock | undefined;
-      return (
-        <div>
-          <div data-testid="note-content">{JSON.stringify(note.blocks)}</div>
-          <div data-testid="note-result">{firstBlock ? runtime.blocks[firstBlock.id]?.result : ""}</div>
-          <button
-            type="button"
-            onClick={() => onChange(note.id, [block(`${note.id}-edited`, "2 + 2")])}
-          >
-            Edit expression
-          </button>
-        </div>
-      );
-    },
-  };
-});
+vi.mock("../src/editor/EditorPane", () => ({
+  EditorPane: ({ note, runtime, onChange }: {
+    note: StoredNote;
+    runtime: DocumentRuntime;
+    onChange: (noteId: string, content: string) => void;
+  }) => (
+    <div>
+      <div data-testid="note-content">{note.content}</div>
+      <div data-testid="note-result">{runtime.lines[0]?.result ?? ""}</div>
+      <button type="button" onClick={() => onChange(note.id, "2 + 2")}>Edit expression</button>
+    </div>
+  ),
+}));
 
 import App from "../src/App";
 
-function block(id: string, content: string): AppBlock {
-  return { id, type: "paragraph", props: {}, content, children: [] };
-}
+let desktopListener: ((event: MediaQueryListEvent) => void) | undefined;
 
 function storedNote(id: string, title: string, content: string): StoredNote {
-  return {
-    id,
-    title,
-    blocks: [block(`${id}-initial`, content)],
-    createdAt: 1,
-    updatedAt: 1,
-    lastOpenedAt: 1,
-  };
+  return { id, title, content, createdAt: 1, updatedAt: 1, lastOpenedAt: 1 };
 }
 
 function click(element: Element): void {
@@ -97,7 +66,9 @@ describe("App note workflow", () => {
       configurable: true,
       value: vi.fn(() => ({
         matches: false,
-        addEventListener: vi.fn(),
+        addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+          desktopListener = listener;
+        },
         removeEventListener: vi.fn(),
       })),
     });
@@ -107,15 +78,13 @@ describe("App note workflow", () => {
     vi.useRealTimers();
     mocks.deleteNote.mockReset().mockResolvedValue(undefined);
     mocks.saveNote.mockReset().mockResolvedValue(undefined);
-    mocks.evaluateDocument.mockReset().mockImplementation(async (blocks: AppBlock[]) => {
-      const first = blocks[0];
-      return {
-        blocks: first ? { [first.id]: { result: `result:${String(first.content)}`, tokens: [] } } : {},
-        variables: [],
-        engine: "development-fallback",
-        status: "ready",
-      } satisfies DocumentRuntime;
-    });
+    mocks.evaluateDocument.mockReset().mockImplementation(async (source: string) => ({
+      lines: source ? [{ line: 1, from: 0, to: source.length, result: `result:${source}`, tokens: [] }] : [],
+      variables: [],
+      engine: "development-fallback",
+      status: "ready",
+    } satisfies DocumentRuntime));
+    desktopListener = undefined;
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -124,17 +93,15 @@ describe("App note workflow", () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     document.body.replaceChildren();
+    vi.useRealTimers();
   });
 
   it("shows loading UI until stored notes are ready", async () => {
     let resolveNotes!: (notes: StoredNote[]) => void;
-    mocks.listNotes.mockReturnValue(new Promise<StoredNote[]>((resolve) => {
-      resolveNotes = resolve;
-    }));
+    mocks.listNotes.mockReturnValue(new Promise<StoredNote[]>((resolve) => { resolveNotes = resolve; }));
 
     act(() => root.render(<App />));
     expect(container.textContent).toContain("Loading notes...");
-    expect(container.querySelector("[data-testid='loader']")).not.toBeNull();
 
     await act(async () => {
       resolveNotes([storedNote("a", "Note A", "1 + 1")]);
@@ -149,39 +116,25 @@ describe("App note workflow", () => {
       storedNote("a", "Note A", "1 + 1"),
       storedNote("b", "Note B", "3 + 3"),
     ]);
-
-    await act(async () => {
-      root.render(<App />);
-      await flush();
-    });
+    await act(async () => { root.render(<App />); await flush(); });
     await act(async () => {
       click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Edit expression")!);
       await flush();
     });
-    await act(async () => {
-      click(container.querySelector("[aria-label='Open Note B']")!);
-      await flush();
-    });
-    await act(async () => {
-      click(container.querySelector("[aria-label='Open Note A']")!);
-      await flush();
-    });
+    await act(async () => { click(container.querySelector("[aria-label='Open Note B']")!); await flush(); });
+    await act(async () => { click(container.querySelector("[aria-label='Open Note A']")!); await flush(); });
 
-    expect(container.querySelector("[data-testid='note-content']")?.textContent).toContain("2 + 2");
-    expect(container.querySelector("[data-testid='note-result']")?.textContent).toContain("result:2 + 2");
+    expect(container.querySelector("[data-testid='note-content']")?.textContent).toBe("2 + 2");
+    expect(container.querySelector("[data-testid='note-result']")?.textContent).toBe("result:2 + 2");
   });
 
-  it("keeps the latest note queued for saving after an immediate switch", async () => {
+  it("keeps the latest plain text queued for saving after an immediate switch", async () => {
     vi.useFakeTimers();
     mocks.listNotes.mockResolvedValue([
       storedNote("a", "Note A", "1 + 1"),
       storedNote("b", "Note B", "3 + 3"),
     ]);
-
-    await act(async () => {
-      root.render(<App />);
-      await flush();
-    });
+    await act(async () => { root.render(<App />); await flush(); });
     await act(async () => {
       click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Edit expression")!);
       click(container.querySelector("[aria-label='Open Note B']")!);
@@ -189,62 +142,64 @@ describe("App note workflow", () => {
       await flush();
     });
 
-    expect(mocks.saveNote).toHaveBeenCalledWith(expect.objectContaining({
-      id: "a",
-      blocks: [expect.objectContaining({ content: "2 + 2" })],
-    }));
-    vi.useRealTimers();
+    expect(mocks.saveNote).toHaveBeenCalledWith(expect.objectContaining({ id: "a", content: "2 + 2" }));
   });
 
-  it("confirms and deletes the selected note from its own row", async () => {
+  it("flushes a pending save when the page is hidden", async () => {
+    vi.useFakeTimers();
+    mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
+    await act(async () => { root.render(<App />); await flush(); });
+    act(() => click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Edit expression")!));
+
+    await act(async () => {
+      window.dispatchEvent(new Event("pagehide"));
+      await flush();
+    });
+    expect(mocks.saveNote).toHaveBeenCalledWith(expect.objectContaining({ id: "a", content: "2 + 2" }));
+  });
+
+  it("closes the mobile notes dialog when the viewport becomes desktop-sized", async () => {
+    mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
+    await act(async () => { root.render(<App />); await flush(); });
+    await act(async () => { click(container.querySelector("[aria-label='Open notes']")!); await flush(); });
+    expect(container.querySelector(".notes-drawer[open]")).not.toBeNull();
+
+    await act(async () => {
+      desktopListener?.({ matches: true } as MediaQueryListEvent);
+      await flush();
+    });
+    expect(container.querySelector(".notes-drawer[open]")).toBeNull();
+  });
+
+  it("confirms and deletes a note from its own row", async () => {
     mocks.listNotes.mockResolvedValue([
       storedNote("a", "Note A", "1 + 1"),
       storedNote("b", "Note B", "3 + 3"),
     ]);
-
-    await act(async () => {
-      root.render(<App />);
-      await flush();
-    });
-    act(() => click(container.querySelector("[aria-label='Delete Note B']")!));
-    expect(container.querySelector("[role='dialog']")?.textContent).toContain("Note B");
+    await act(async () => { root.render(<App />); await flush(); });
+    await act(async () => { click(container.querySelector("[aria-label='Delete Note B']")!); await flush(); });
+    expect(container.querySelector("dialog[open]")?.textContent).toContain("Note B");
 
     await act(async () => {
       const deleteButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Delete");
       click(deleteButton!);
       await flush();
     });
-
     expect(mocks.deleteNote).toHaveBeenCalledWith("b");
     expect(container.querySelector("[aria-label='Open Note B']")).toBeNull();
-    expect(container.querySelector("[aria-label='Open Note A']")).not.toBeNull();
   });
 
   it("reschedules the latest content when deletion fails", async () => {
     vi.useFakeTimers();
     mocks.deleteNote.mockRejectedValueOnce(new Error("delete failed"));
     mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
-
-    await act(async () => {
-      root.render(<App />);
-      await flush();
-    });
+    await act(async () => { root.render(<App />); await flush(); });
     act(() => click(Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Edit expression")!));
-    act(() => click(container.querySelector("[aria-label='Delete Note A']")!));
-    await act(async () => {
-      click(container.querySelector("[aria-label='Delete note']")!);
-      await flush();
-    });
+    await act(async () => { click(container.querySelector("[aria-label='Delete Note A']")!); await flush(); });
+    await act(async () => { click(container.querySelector("[aria-label='Delete note']")!); await flush(); });
     expect(container.querySelector("[role='alert']")?.textContent).toContain("could not be deleted");
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(450);
-      await flush();
-    });
-    expect(mocks.saveNote).toHaveBeenCalledWith(expect.objectContaining({
-      id: "a",
-      blocks: [expect.objectContaining({ content: "2 + 2" })],
-    }));
-    vi.useRealTimers();
+    await act(async () => { await vi.advanceTimersByTimeAsync(450); await flush(); });
+    expect(mocks.saveNote).toHaveBeenCalledWith(expect.objectContaining({ id: "a", content: "2 + 2" }));
   });
 });

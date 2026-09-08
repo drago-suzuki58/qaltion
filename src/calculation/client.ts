@@ -1,6 +1,5 @@
-import type { AppBlock, DocumentRuntime } from "../types";
+import type { CalculationRequest, CalculationResponse, DocumentRuntime } from "../types";
 
-type WorkerResponse = { id: number; runtime: DocumentRuntime };
 type PendingRequest = {
   resolve: (runtime: DocumentRuntime) => void;
   reject: (error: Error) => void;
@@ -13,7 +12,7 @@ export class CalculationClient {
   private readonly pending = new Map<number, PendingRequest>();
 
   constructor() {
-    this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+    this.worker.onmessage = (event: MessageEvent<CalculationResponse>) => {
       const request = this.pending.get(event.data.id);
       if (!request) return;
       window.clearTimeout(request.timeout);
@@ -24,7 +23,7 @@ export class CalculationClient {
     this.worker.onmessageerror = () => this.rejectPending(new Error("The calculation worker returned an invalid response."));
   }
 
-  evaluateDocument(blocks: AppBlock[]): Promise<DocumentRuntime> {
+  evaluateDocument(source: string): Promise<DocumentRuntime> {
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       const timeout = window.setTimeout(() => {
@@ -32,7 +31,8 @@ export class CalculationClient {
         reject(new Error("Calculation timed out."));
       }, 30_000);
       this.pending.set(id, { resolve, reject, timeout });
-      this.worker.postMessage({ id, blocks });
+      const request: CalculationRequest = { id, source };
+      this.worker.postMessage(request);
     });
   }
 

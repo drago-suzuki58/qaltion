@@ -1,77 +1,77 @@
-import { BlockNoteView } from "@blocknote/mantine";
-import {
-  DefaultReactSuggestionItem,
-  SuggestionMenuController,
-  getDefaultReactSlashMenuItems,
-  useCreateBlockNote,
-} from "@blocknote/react";
-import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from "@blocknote/core/extensions";
-import { useEffect, useLayoutEffect } from "react";
-import type { AppBlock, DocumentRuntime, StoredNote } from "../types";
-import { RuntimeContext } from "./runtime-context";
-import { schema } from "./special-blocks";
-import { CalculationDecorationExtension } from "./decorate";
+import { setDiagnostics } from "@codemirror/lint";
+import { EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { useEffect, useLayoutEffect, useRef } from "react";
+import type { DocumentRuntime, StoredNote } from "../types";
+import { runtimeDiagnostics } from "./diagnostics";
+import { qaltionExtensions } from "./extensions";
+import { setRuntime } from "./highlighting";
 
 type Props = {
   note: StoredNote;
   runtime: DocumentRuntime;
-  onChange: (noteId: string, blocks: AppBlock[]) => void;
+  onChange: (noteId: string, content: string) => void;
 };
 
-function customSlashItems(editor: typeof schema.BlockNoteEditor): DefaultReactSuggestionItem[] {
-  const customItems: DefaultReactSuggestionItem[] = [
-    {
-      title: "Variables",
-      aliases: ["variables", "vars"],
-      group: "Qaltion",
-      subtext: "Show values defined above this point",
-      onItemClick: () => insertOrUpdateBlockForSlashMenu(editor, { type: "variables" }),
-    },
-    {
-      title: "Result",
-      aliases: ["result", "calculate"],
-      group: "Qaltion",
-      subtext: "Keep a dynamic expression result as a block",
-      onItemClick: () => insertOrUpdateBlockForSlashMenu(editor, { type: "result", content: "1 + 2" }),
-    },
-  ];
-  return [...customItems, ...getDefaultReactSlashMenuItems(editor)];
-}
-
 export function EditorPane({ note, runtime, onChange }: Props) {
-  const editor = useCreateBlockNote({
-    schema,
-    initialContent: note.blocks as never,
-    extensions: [CalculationDecorationExtension()],
-  });
+  const mountRef = useRef<HTMLDivElement>(null);
+  const laneRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView>(null);
 
   useLayoutEffect(() => {
-    editor.getExtension(CalculationDecorationExtension)?.setRuntime(runtime);
-  }, [editor, runtime]);
+    const mount = mountRef.current;
+    const lane = laneRef.current;
+    if (!mount || !lane) return;
+
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: note.content,
+        extensions: qaltionExtensions({
+          lane,
+          onChange: (content) => onChange(note.id, content),
+        }),
+      }),
+      parent: mount,
+    });
+    viewRef.current = view;
+    return () => {
+      viewRef.current = null;
+      view.destroy();
+    };
+  }, [note.id, onChange]);
 
   useEffect(() => {
-    onChange(note.id, editor.document as AppBlock[]);
-  }, [editor, note.id, onChange]);
+    const view = viewRef.current;
+    if (!view) return;
+    const content = view.state.doc.toString();
+    if (content !== note.content) {
+      view.dispatch({ changes: { from: 0, to: content.length, insert: note.content } });
+    }
+  }, [note.content]);
+
+  useLayoutEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const diagnostics = runtime.status === "pending"
+      ? undefined
+      : runtimeDiagnostics(runtime, view.state.doc.length);
+    view.dispatch(
+      { effects: setRuntime.of(runtime) },
+      ...(diagnostics ? [setDiagnostics(view.state, diagnostics)] : []),
+    );
+  }, [runtime]);
 
   return (
-    <RuntimeContext.Provider value={runtime}>
-      <div className="editor-host" aria-busy={runtime.status === "pending"}>
-        <div className="visually-hidden" role="status" aria-live="polite">
-          {runtime.status === "pending" ? "Calculating" : runtime.status === "error" ? runtime.failure : ""}
-        </div>
-        <BlockNoteView
-          editor={editor}
-          slashMenu={false}
-          sideMenu={false}
-          formattingToolbar={false}
-          onChange={() => onChange(note.id, editor.document as AppBlock[])}
-        >
-          <SuggestionMenuController
-            triggerCharacter="/"
-            getItems={async (query) => filterSuggestionItems(customSlashItems(editor), query)}
-          />
-        </BlockNoteView>
+    <div className="editor-host" aria-busy={runtime.status === "pending"}>
+      <section className="visually-hidden" aria-label="Calculation results">
+        {runtime.status === "ready" && runtime.lines.flatMap((line) => line.result
+          ? [<output key={line.line}>Line {line.line}: {line.result}</output>]
+          : [])}
+      </section>
+      <div className="editor-layout">
+        <div className="editor-mount" ref={mountRef} />
+        <div className="result-lane" ref={laneRef} aria-hidden="true" />
       </div>
-    </RuntimeContext.Provider>
+    </div>
   );
 }

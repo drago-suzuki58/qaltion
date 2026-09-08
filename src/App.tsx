@@ -1,34 +1,26 @@
-import { Drawer, Loader, Modal } from "@mantine/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CalculationClient } from "./calculation/client";
+import { AppDialog } from "./components/AppDialog";
 import { EditorPane } from "./editor/EditorPane";
-import type { AppBlock, DocumentRuntime, StoredNote } from "./types";
 import { deleteNote, listNotes, saveNote } from "./storage/database";
 import { createSampleNote } from "./storage/sample";
+import type { DocumentRuntime, StoredNote } from "./types";
 
 function createEmptyRuntime(status: DocumentRuntime["status"] = "idle", failure?: string): DocumentRuntime {
-  return { blocks: {}, variables: [], engine: "development-fallback", status, failure };
+  return { lines: [], variables: [], engine: "development-fallback", status, failure };
 }
 
 function createBlankNote(): StoredNote {
   const note = createSampleNote();
-  return { ...note, title: "Untitled note", blocks: [{ type: "paragraph", content: "" }] };
+  return { ...note, title: "Untitled note", content: "" };
 }
 
 function MenuIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h16M4 12h16M4 17h16" />
-    </svg>
-  );
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>;
 }
 
 function PlusIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>;
 }
 
 function TrashIcon() {
@@ -37,6 +29,10 @@ function TrashIcon() {
       <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" />
     </svg>
   );
+}
+
+function CloseIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>;
 }
 
 type NotesListProps = {
@@ -85,7 +81,6 @@ export default function App() {
   const [activeNoteId, setActiveNoteId] = useState("");
   const activeNoteIdRef = useRef("");
   const [loadStatus, setLoadStatus] = useState<"loading" | "ready">("loading");
-  const [calculationInput, setCalculationInput] = useState<{ noteId: string; blocks: AppBlock[] }>();
   const [runtime, setRuntime] = useState<DocumentRuntime>(() => createEmptyRuntime());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string>();
@@ -96,6 +91,7 @@ export default function App() {
   const calculationClient = useRef<CalculationClient | null>(null);
   const scheduledSaves = useRef(new Map<string, ScheduledSave>());
   const saveQueues = useRef(new Map<string, Promise<void>>());
+  const activeContent = notes.find((note) => note.id === activeNoteId)?.content;
 
   const replaceNotes = useCallback((nextNotes: StoredNote[]) => {
     notesRef.current = nextNotes;
@@ -137,9 +133,17 @@ export default function App() {
     const current = notesRef.current.find((note) => note.id === id);
     if (!current) return;
     const updated = update(current);
-    replaceNotes(notesRef.current.map((note) => (note.id === id ? updated : note)));
+    replaceNotes(notesRef.current.map((note) => note.id === id ? updated : note));
     scheduleSave(updated);
   }, [replaceNotes, scheduleSave]);
+
+  const flushScheduledSaves = useCallback(() => {
+    for (const { timer, note } of scheduledSaves.current.values()) {
+      window.clearTimeout(timer);
+      void queueSave(note);
+    }
+    scheduledSaves.current.clear();
+  }, [queueSave]);
 
   useEffect(() => {
     let current = true;
@@ -166,7 +170,6 @@ export default function App() {
         setLoadError("Stored notes could not be loaded. Changes will remain open in this tab.");
         setLoadStatus("ready");
       });
-
     return () => {
       current = false;
       calculationClient.current?.dispose();
@@ -174,34 +177,41 @@ export default function App() {
   }, [replaceNotes]);
 
   useEffect(() => {
-    if (!calculationInput || calculationInput.noteId !== activeNoteId) return;
-    let current = true;
+    if (loadStatus !== "ready" || activeContent === undefined) return;
     const client = calculationClient.current;
     if (!client) {
       setRuntime(createEmptyRuntime("error", "The calculation engine could not be started."));
       return;
     }
-    void client.evaluateDocument(calculationInput.blocks)
+    const noteId = activeNoteId;
+    let current = true;
+    setRuntime((previous) => ({ ...previous, status: "pending", failure: undefined }));
+    void client.evaluateDocument(activeContent)
       .then((nextRuntime) => {
-        if (current && activeNoteIdRef.current === calculationInput.noteId) setRuntime(nextRuntime);
+        if (current && activeNoteIdRef.current === noteId) setRuntime(nextRuntime);
       })
       .catch((error: unknown) => {
-        if (!current || activeNoteIdRef.current !== calculationInput.noteId) return;
+        if (!current || activeNoteIdRef.current !== noteId) return;
         const message = error instanceof Error ? error.message : "Calculation failed.";
         setRuntime(createEmptyRuntime("error", message));
       });
     return () => {
       current = false;
     };
-  }, [activeNoteId, calculationInput]);
+  }, [activeContent, activeNoteId, loadStatus]);
 
-  useEffect(() => () => {
-    for (const { timer, note } of scheduledSaves.current.values()) {
-      window.clearTimeout(timer);
-      void queueSave(note);
-    }
-    scheduledSaves.current.clear();
-  }, [queueSave]);
+  useEffect(() => {
+    const flushWhenHidden = () => {
+      if (document.visibilityState === "hidden") flushScheduledSaves();
+    };
+    window.addEventListener("pagehide", flushScheduledSaves);
+    document.addEventListener("visibilitychange", flushWhenHidden);
+    return () => {
+      window.removeEventListener("pagehide", flushScheduledSaves);
+      document.removeEventListener("visibilitychange", flushWhenHidden);
+      flushScheduledSaves();
+    };
+  }, [flushScheduledSaves]);
 
   useEffect(() => {
     const desktop = window.matchMedia("(min-width: 641px)");
@@ -213,11 +223,8 @@ export default function App() {
     return () => desktop.removeEventListener("change", closeDrawerOnDesktop);
   }, []);
 
-  const handleEditorChange = useCallback((noteId: string, blocks: AppBlock[]) => {
-    updateNote(noteId, (note) => ({ ...note, blocks, updatedAt: Date.now() }));
-    if (activeNoteIdRef.current !== noteId) return;
-    setRuntime((current) => ({ ...current, status: "pending", failure: undefined }));
-    setCalculationInput({ noteId, blocks });
+  const handleEditorChange = useCallback((noteId: string, content: string) => {
+    updateNote(noteId, (note) => ({ ...note, content, updatedAt: Date.now() }));
   }, [updateNote]);
 
   const selectNote = useCallback((id: string) => {
@@ -226,13 +233,15 @@ export default function App() {
     updateNote(id, (note) => ({ ...note, lastOpenedAt: Date.now() }));
     activeNoteIdRef.current = id;
     setActiveNoteId(id);
-    setCalculationInput(undefined);
     setRuntime(createEmptyRuntime());
   }, [updateNote]);
 
   const renameNote = useCallback((title: string) => {
-    const id = activeNoteIdRef.current;
-    updateNote(id, (note) => ({ ...note, title: title || "Untitled note", updatedAt: Date.now() }));
+    updateNote(activeNoteIdRef.current, (note) => ({
+      ...note,
+      title: title || "Untitled note",
+      updatedAt: Date.now(),
+    }));
   }, [updateNote]);
 
   const addNote = useCallback(() => {
@@ -241,12 +250,12 @@ export default function App() {
     scheduleSave(created);
     activeNoteIdRef.current = created.id;
     setActiveNoteId(created.id);
-    setCalculationInput(undefined);
     setRuntime(createEmptyRuntime());
     setDrawerOpen(false);
   }, [replaceNotes, scheduleSave]);
 
   const requestDelete = useCallback((id: string) => {
+    setDrawerOpen(false);
     setDeleteError("");
     setDeleteTargetId(id);
   }, []);
@@ -285,7 +294,6 @@ export default function App() {
       if (activeNoteIdRef.current === deleteTargetId) {
         activeNoteIdRef.current = remaining[0].id;
         setActiveNoteId(remaining[0].id);
-        setCalculationInput(undefined);
         setRuntime(createEmptyRuntime());
       }
       setDeleteTargetId(undefined);
@@ -299,18 +307,17 @@ export default function App() {
   }, [deleteTargetId, replaceNotes, scheduleSave]);
 
   if (loadStatus === "loading") {
-    return (
-      <main className="loading-screen" role="status" aria-live="polite">
-        <Loader size={28} color="#4257a6" />
-        <span>Loading notes...</span>
-      </main>
-    );
+    return <main className="loading-screen" role="status" aria-live="polite">Loading notes...</main>;
   }
 
   const note = notes.find((item) => item.id === activeNoteId);
   if (!note) return null;
   const deleteTarget = notes.find((item) => item.id === deleteTargetId);
   const storageError = loadError || saveErrors[activeNoteId];
+
+  const notesList = (
+    <NotesList notes={notes} activeNoteId={activeNoteId} onSelect={selectNote} onDelete={requestDelete} />
+  );
 
   return (
     <>
@@ -319,11 +326,10 @@ export default function App() {
           <div className="sidebar-heading">
             <div className="brand" aria-label="Qaltion">Qaltion</div>
             <button type="button" className="new-note-button" onClick={addNote}>
-              <PlusIcon />
-              <span>New note</span>
+              <PlusIcon /><span>New note</span>
             </button>
           </div>
-          <NotesList notes={notes} activeNoteId={activeNoteId} onSelect={selectNote} onDelete={requestDelete} />
+          {notesList}
         </aside>
 
         <div className="workspace">
@@ -331,7 +337,7 @@ export default function App() {
             <button type="button" className="icon-button" aria-label="Open notes" onClick={() => setDrawerOpen(true)}>
               <MenuIcon />
             </button>
-            <div className="brand" aria-label="Qaltion">Qaltion</div>
+            <span className="mobile-title">{note.title}</span>
             <button type="button" className="icon-button" aria-label="New note" onClick={addNote}>
               <PlusIcon />
             </button>
@@ -339,11 +345,14 @@ export default function App() {
           {storageError && <div className="storage-error" role="alert">{storageError}</div>}
           <section className="document-shell" aria-label="Calculation note">
             <div className="note-heading">
-              <input
-                aria-label="Note title"
-                value={note.title}
-                onChange={(event) => renameNote(event.target.value)}
-              />
+              <input aria-label="Note title" value={note.title} onChange={(event) => renameNote(event.target.value)} />
+              <div className="engine-status" aria-live="polite">
+                {runtime.status === "pending" && runtime.lines.length === 0
+                  ? "Loading calculation engine..."
+                  : runtime.status === "ready" && runtime.engine === "development-fallback"
+                    ? "Development fallback engine"
+                    : ""}
+              </div>
             </div>
             {runtime.status === "error" && <div className="calculation-error" role="alert">{runtime.failure}</div>}
             <EditorPane key={note.id} note={note} runtime={runtime} onChange={handleEditorChange} />
@@ -351,37 +360,33 @@ export default function App() {
         </div>
       </main>
 
-      <Drawer
-        opened={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        title="Notes"
-        position="left"
-        size={320}
-        classNames={{ content: "notes-drawer", body: "notes-drawer-body" }}
-      >
+      <AppDialog className="notes-drawer" labelledBy="notes-drawer-title" open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+        <div className="drawer-heading">
+          <h2 id="notes-drawer-title">Notes</h2>
+          <button type="button" className="icon-button" aria-label="Close notes" autoFocus onClick={() => setDrawerOpen(false)}>
+            <CloseIcon />
+          </button>
+        </div>
         <button type="button" className="new-note-button drawer-new-note" onClick={addNote}>
-          <PlusIcon />
-          <span>New note</span>
+          <PlusIcon /><span>New note</span>
         </button>
-        <NotesList notes={notes} activeNoteId={activeNoteId} onSelect={selectNote} onDelete={requestDelete} />
-      </Drawer>
+        {notesList}
+      </AppDialog>
 
-      <Modal
-        opened={Boolean(deleteTarget)}
+      <AppDialog
+        className="delete-modal"
+        labelledBy="delete-modal-title"
+        open={Boolean(deleteTarget)}
+        preventClose={deleteStatus === "deleting"}
         onClose={closeDeleteDialog}
-        title="Delete note?"
-        centered
-        closeOnClickOutside={deleteStatus !== "deleting"}
-        closeOnEscape={deleteStatus !== "deleting"}
-        withCloseButton={deleteStatus !== "deleting"}
-        classNames={{ content: "delete-modal", title: "delete-modal-title" }}
       >
+        <h2 id="delete-modal-title">Delete note?</h2>
         <p className="delete-modal-copy">
           {deleteTarget ? `“${deleteTarget.title}” will be permanently deleted.` : "This note will be permanently deleted."}
         </p>
         {deleteError && <div className="delete-error" role="alert">{deleteError}</div>}
         <div className="delete-modal-actions">
-          <button type="button" className="secondary-button" data-autofocus onClick={closeDeleteDialog} disabled={deleteStatus === "deleting"}>
+          <button type="button" className="secondary-button" autoFocus onClick={closeDeleteDialog} disabled={deleteStatus === "deleting"}>
             Cancel
           </button>
           <button
@@ -392,15 +397,10 @@ export default function App() {
             onClick={() => void confirmDelete()}
             disabled={deleteStatus === "deleting"}
           >
-            {deleteStatus === "deleting" ? (
-              <>
-                <Loader size={16} color="white" aria-hidden="true" />
-                <span className="visually-hidden">Deleting...</span>
-              </>
-            ) : "Delete"}
+            {deleteStatus === "deleting" ? "Deleting..." : "Delete"}
           </button>
         </div>
-      </Modal>
+      </AppDialog>
     </>
   );
 }

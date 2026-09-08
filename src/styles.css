@@ -1,19 +1,17 @@
-@import url("@blocknote/mantine/style.css");
-
 :root {
   color: #252522;
   background: #eeede7;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --background: #eeede7;
-  --surface: #fffefa;
+  --editor-background: #fffefa;
   --text: #252522;
   --text-muted: #686861;
   --border: #d4d2c8;
   --accent: #4257a6;
-  --accent-soft: #e9ebf5;
   --error: #9d5149;
+  --result-lane-width: clamp(160px, 28%, 260px);
 }
 
 * {
@@ -38,7 +36,7 @@ button {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr);
+  grid-template-columns: 232px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -46,12 +44,12 @@ button {
   position: sticky;
   top: 0;
   display: flex;
-  flex-direction: column;
-  height: 100vh;
   min-width: 0;
+  height: 100vh;
+  flex-direction: column;
   border-right: 1px solid var(--border);
   background: #f5f4ef;
-  padding: 20px 14px;
+  padding: 18px 12px;
 }
 
 .brand {
@@ -60,12 +58,16 @@ button {
   letter-spacing: 0.02em;
 }
 
-.sidebar-heading {
+.sidebar-heading,
+.drawer-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 6px 18px;
+}
+
+.sidebar-heading {
+  padding: 0 6px 16px;
 }
 
 .new-note-button,
@@ -76,19 +78,19 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
 .new-note-button {
   min-height: 34px;
-  border: 0;
   gap: 6px;
-  background: var(--accent-soft);
+  border: 1px solid #cbd0e2;
+  background: #e9ebf5;
   color: var(--accent);
   font-size: 13px;
   font-weight: 600;
-  padding: 6px 10px;
+  padding: 6px 9px;
 }
 
 .new-note-button svg,
@@ -113,23 +115,24 @@ button {
 .note-delete-button:focus-visible,
 .secondary-button:focus-visible,
 .danger-button:focus-visible,
-.note-heading input:focus-visible {
+.note-heading input:focus-visible,
+.cm-editor.cm-focused {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
 .notes-navigation {
   display: flex;
+  min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  min-height: 0;
   overflow-y: auto;
 }
 
 .notes-list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -139,26 +142,30 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 36px;
   align-items: center;
-  border-radius: 7px;
+  border-radius: 4px;
 }
 
 .note-row.selected {
-  background: var(--accent-soft);
+  background: #e9ebf5;
+}
+
+.note-row:not(.selected):hover {
+  background: #ebeae4;
 }
 
 .note-option {
   display: flex;
   min-width: 0;
+  min-height: 50px;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   cursor: pointer;
   font-size: 13px;
-  min-height: 52px;
-  padding: 8px 10px;
+  padding: 7px 9px;
   text-align: left;
 }
 
@@ -171,13 +178,10 @@ button {
   white-space: nowrap;
 }
 
-.note-option small {
+.note-option small,
+.engine-status {
   color: var(--text-muted);
   font-size: 11px;
-}
-
-.note-row:not(.selected):hover {
-  background: #ebeae4;
 }
 
 .note-delete-button,
@@ -194,30 +198,35 @@ button {
   color: var(--error);
 }
 
+.icon-button:hover {
+  background: #e8e7e1;
+  color: var(--text);
+}
+
 .workspace {
   min-width: 0;
   min-height: 100vh;
   background: var(--background);
-  padding: 24px;
+  padding: 32px;
 }
 
 .mobile-header {
   display: none;
 }
 
+.document-shell,
+.storage-error {
+  width: min(1000px, 100%);
+  margin-right: auto;
+  margin-left: auto;
+}
+
 .document-shell {
-  width: min(960px, 100%);
-  min-height: calc(100vh - 48px);
-  margin: 0 auto;
-  border: 1px solid #e4e2da;
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: 0 10px 32px rgb(37 37 34 / 6%);
-  padding: 48px 56px 96px;
+  padding: 22px 0 72px;
 }
 
 .note-heading {
-  margin: 0 0 28px;
+  margin: 0 16px 22px;
 }
 
 .note-heading input {
@@ -226,246 +235,176 @@ button {
   outline: 0;
   background: transparent;
   color: var(--text);
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 600;
-  padding: 0 0 4px;
+  padding: 0 0 3px;
 }
 
-.note-heading input:focus-visible {
-  border-radius: 2px;
+.engine-status {
+  min-height: 17px;
+  margin-top: 3px;
 }
 
 .storage-error,
 .calculation-error,
 .delete-error {
   border: 1px solid #dfbbb6;
-  border-radius: 6px;
+  border-radius: 4px;
   background: #fbefed;
   color: #773d36;
   font-size: 13px;
 }
 
 .storage-error {
-  width: min(960px, 100%);
-  margin: 0 auto 12px;
-  padding: 10px 12px;
+  margin-bottom: 12px;
+  padding: 9px 11px;
 }
 
 .calculation-error {
-  margin-bottom: 18px;
-  padding: 10px 12px;
+  margin: 0 0 12px;
+  padding: 9px 11px;
 }
 
-.editor-host {
+.editor-host,
+.editor-layout,
+.editor-mount,
+.cm-editor {
   min-width: 0;
 }
 
-.editor-host .bn-root {
-  --bn-colors-editor-text: var(--text);
-  --bn-colors-editor-background: transparent;
-  --bn-colors-menu-text: var(--text);
-  --bn-colors-menu-background: var(--surface);
-  --bn-colors-tooltip-text: var(--text);
-  --bn-colors-tooltip-background: #ebe9e1;
-  --bn-colors-hovered-text: var(--text);
-  --bn-colors-hovered-background: #f0efe9;
-  --bn-colors-selected-text: #fff;
-  --bn-colors-selected-background: var(--accent);
-  --bn-colors-disabled-text: var(--text-muted);
-  --bn-colors-disabled-background: #efeee8;
-  --bn-colors-shadow: rgb(37 37 34 / 16%);
-  --bn-colors-border: var(--border);
-  --bn-colors-side-menu: var(--text-muted);
-  --bn-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --bn-border-radius: 6px;
+.editor-layout {
+  position: relative;
+  min-height: 440px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--editor-background);
 }
 
-.bn-container,
-.bn-editor {
-  background: transparent !important;
-}
-
-.bn-editor {
-  min-height: 300px;
-  padding: 0 !important;
-}
-
-.bn-block-outer {
-  margin: 0;
-}
-
-.bn-block-content {
-  min-width: 0;
+.cm-editor {
+  min-height: 438px;
+  background: transparent;
   color: var(--text);
-  font-size: 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 15px;
   line-height: 1.55;
 }
 
-.bn-block-content[data-content-type="paragraph"] {
-  overflow-wrap: anywhere;
+.cm-editor.cm-focused {
+  outline-offset: -2px;
 }
 
-.bn-block-outer.qaltion-comment .bn-block-content {
+.cm-scroller {
+  min-height: 438px;
+  overflow: visible;
+  font-family: inherit;
+  line-height: inherit;
+}
+
+.cm-content {
+  min-height: 438px;
+  padding: 18px calc(var(--result-lane-width) + 24px) 72px 20px;
+  caret-color: var(--text);
+}
+
+.cm-line {
+  padding: 0;
+}
+
+.cm-cursor,
+.cm-dropCursor {
+  border-left-color: var(--text);
+}
+
+.cm-selectionBackground,
+.cm-focused .cm-selectionBackground,
+::selection {
+  background: #dce1f2 !important;
+}
+
+.cm-placeholder,
+.tok-comment {
   color: var(--text-muted);
 }
 
-.bn-block-outer.qaltion-definition .bn-block-content > .bn-inline-content {
-  text-decoration: underline;
-  text-decoration-color: rgb(66 87 166 / 28%);
+.tok-definition {
+  font-weight: 650;
+}
+
+.tok-reference,
+.tok-function,
+.tok-constant,
+.tok-unit,
+.tok-currency {
+  color: var(--accent);
+}
+
+.tok-unit,
+.tok-currency {
+  opacity: 0.86;
+}
+
+.tok-undefined {
+  text-decoration: underline wavy var(--error);
   text-decoration-thickness: 1px;
-  text-underline-offset: 4px;
+  text-underline-offset: 3px;
 }
 
-.bn-block-outer.qaltion-reference .bn-block-content > .bn-inline-content {
-  color: #334b91;
+.cm-lintRange-error {
+  background-image: none;
+  text-decoration: underline wavy var(--error);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
-.bn-block-outer.qaltion-undefined .bn-block-content > .bn-inline-content {
-  text-decoration: underline dotted var(--error);
-  text-underline-offset: 4px;
+.cm-tooltip {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--editor-background);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 12px;
 }
 
-.bn-block-outer.qaltion-calculation .bn-block-content,
-.bn-block-outer.qaltion-pending .bn-block-content {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
+.cm-panels {
+  border-color: var(--border);
+  background: #f5f4ef;
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, sans-serif;
 }
 
-.bn-block-outer.qaltion-calculation .bn-block-content > .bn-inline-content,
-.bn-block-outer.qaltion-pending .bn-block-content > .bn-inline-content {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.bn-block-outer.qaltion-calculation .bn-block-content::after {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-  content: attr(data-result);
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: 14px;
-  white-space: nowrap;
-}
-
-.bn-block-outer.qaltion-error .bn-block-content {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-}
-
-.bn-block-outer.qaltion-error .bn-block-content > .bn-inline-content {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.bn-block-outer.qaltion-error .bn-block-content::after {
-  flex: 0 0 auto;
-  max-width: 38%;
+.result-lane {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 16px;
+  bottom: 0;
+  width: var(--result-lane-width);
   overflow: hidden;
-  color: var(--error);
-  content: attr(data-error);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
 }
 
-.bn-block-outer.qaltion-pending .bn-block-content::after,
-.calculation-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid #d4d6e2;
-  border-radius: 50%;
-  border-top-color: var(--accent);
-  animation: qaltion-spin 700ms linear infinite;
-}
-
-.bn-block-outer.qaltion-pending .bn-block-content::after {
-  flex: 0 0 auto;
-  content: "";
-}
-
-.calculation-spinner {
-  display: inline-block;
-  vertical-align: -2px;
-}
-
-@keyframes qaltion-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.special-block {
-  margin: 18px 0;
+.line-result {
+  position: absolute;
+  right: 0;
+  display: block;
+  width: 100%;
+  overflow: hidden;
   color: var(--text-muted);
-  font-size: 13px;
-}
-
-.special-block-label {
-  margin-bottom: 8px;
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.special-block-empty {
-  font-size: 13px;
-}
-
-.variables-block dl {
-  display: grid;
-  grid-template-columns: minmax(90px, 180px) 1fr;
-  gap: 4px 16px;
-  margin: 0;
-}
-
-.variables-block dl > div {
-  display: contents;
-}
-
-.variables-block dt,
-.variables-block dd {
-  margin: 0;
-}
-
-.variables-block dt {
-  color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-}
-
-.variables-block dd {
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-}
-
-.result-block {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-  margin: 18px 0;
-}
-
-.result-block-expression {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.result-block output {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 14px;
+  line-height: 1.55;
+  text-align: right;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .loading-screen {
   display: flex;
+  min-height: 100vh;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  min-height: 100vh;
   background: var(--background);
   color: var(--text-muted);
   font-size: 14px;
@@ -481,34 +420,55 @@ button {
   white-space: nowrap;
 }
 
-.notes-drawer {
-  background: #f5f4ef;
+dialog {
+  color: var(--text);
 }
 
-.notes-drawer-body {
+dialog::backdrop {
+  background: rgb(37 37 34 / 32%);
+}
+
+.notes-drawer {
+  width: min(320px, calc(100% - 32px));
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: #f5f4ef;
+  padding: 16px 14px 20px;
+}
+
+.notes-drawer[open] {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: calc(100% - 60px);
-  padding: 0 14px 20px;
+}
+
+.drawer-heading h2,
+.delete-modal h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
 }
 
 .drawer-new-note {
   align-self: stretch;
+  min-height: 44px;
 }
 
 .delete-modal {
+  width: min(420px, calc(100% - 32px));
   border: 1px solid var(--border);
-  border-radius: 10px;
-}
-
-.delete-modal-title {
-  font-size: 18px;
-  font-weight: 650;
+  border-radius: 4px;
+  background: var(--editor-background);
+  padding: 20px;
 }
 
 .delete-modal-copy {
-  margin: 0;
+  margin: 14px 0 0;
   color: var(--text-muted);
   font-size: 14px;
   line-height: 1.55;
@@ -516,14 +476,14 @@ button {
 
 .delete-error {
   margin-top: 14px;
-  padding: 10px 12px;
+  padding: 9px 11px;
 }
 
 .delete-modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 24px;
+  margin-top: 22px;
 }
 
 .secondary-button,
@@ -537,7 +497,7 @@ button {
 }
 
 .secondary-button {
-  background: var(--surface);
+  background: var(--editor-background);
 }
 
 .secondary-button:hover {
@@ -561,6 +521,10 @@ button {
 }
 
 @media (max-width: 640px) {
+  :root {
+    --result-lane-width: clamp(96px, 34vw, 132px);
+  }
+
   .app-shell {
     display: block;
   }
@@ -577,22 +541,30 @@ button {
     position: sticky;
     z-index: 4;
     top: 0;
-    display: flex;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
     align-items: center;
-    justify-content: space-between;
     min-height: 56px;
     border-bottom: 1px solid var(--border);
-    background: rgb(245 244 239 / 96%);
-    padding: 8px 12px;
-    backdrop-filter: blur(10px);
+    background: #f5f4ef;
+    padding: 6px 8px;
+  }
+
+  .mobile-title {
+    overflow: hidden;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .document-shell {
-    min-height: calc(100vh - 56px);
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    padding: 28px 16px 72px;
+    padding: 24px 12px 56px;
+  }
+
+  .note-heading {
+    margin: 0 4px 18px;
   }
 
   .note-heading input {
@@ -621,35 +593,25 @@ button {
     grid-template-columns: minmax(0, 1fr) 44px;
   }
 
-  .bn-block-outer.qaltion-calculation .bn-block-content,
-  .bn-block-outer.qaltion-error .bn-block-content,
-  .bn-block-outer.qaltion-pending .bn-block-content,
-  .result-block {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 4px;
+  .editor-layout {
+    min-height: calc(100dvh - 176px);
   }
 
-  .bn-block-outer.qaltion-calculation .bn-block-content::after,
-  .bn-block-outer.qaltion-error .bn-block-content::after,
-  .bn-block-outer.qaltion-pending .bn-block-content::after {
-    align-self: flex-start;
-    max-width: 100%;
-    overflow: visible;
-    text-overflow: clip;
-    white-space: normal;
-    overflow-wrap: anywhere;
+  .cm-editor,
+  .cm-scroller,
+  .cm-content {
+    min-height: calc(100dvh - 178px);
   }
 
-  .result-block output {
-    white-space: normal;
-    overflow-wrap: anywhere;
+  .cm-content {
+    padding: 14px calc(var(--result-lane-width) + 16px) 56px 14px;
   }
-}
 
-@media (prefers-reduced-motion: reduce) {
-  .bn-block-outer.qaltion-pending .bn-block-content::after,
-  .calculation-spinner {
-    animation: none;
+  .result-lane {
+    right: 10px;
+  }
+
+  .line-result {
+    font-size: 13px;
   }
 }

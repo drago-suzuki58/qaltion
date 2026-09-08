@@ -13,14 +13,12 @@
     "build:wasm": "make -C wasm"
   },
   "dependencies": {
-    "@blocknote/core": "^0.54.0",
-    "@blocknote/mantine": "^0.54.0",
-    "@blocknote/react": "^0.54.0",
-    "@mantine/core": "^8.3.0",
-    "@mantine/hooks": "^8.3.0",
-    "mathjs": "^14.0.1",
-    "prosemirror-state": "^1.4.4",
-    "prosemirror-view": "^1.42.3",
+    "@codemirror/commands": "^6.11.0",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.4",
+    "@codemirror/view": "^6.43.11",
+    "mathjs": "^15.2.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
@@ -28,6 +26,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^27.1.0",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",
