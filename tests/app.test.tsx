@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DocumentRuntime, StoredNote } from "../src/types";
+import { THEME_STORAGE_KEY } from "../src/theme";
 
 const mocks = vi.hoisted(() => ({
   deleteNote: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("../src/editor/EditorPane", () => ({
 import App from "../src/App";
 
 let desktopListener: ((event: MediaQueryListEvent) => void) | undefined;
+let prefersDark = false;
 
 function storedNote(id: string, title: string, content: string): StoredNote {
   return { id, title, content, createdAt: 1, updatedAt: 1, lastOpenedAt: 1 };
@@ -65,8 +67,8 @@ describe("App note workflow", () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
-      value: vi.fn(() => ({
-        matches: false,
+      value: vi.fn((query: string) => ({
+        matches: query === "(prefers-color-scheme: dark)" && prefersDark,
         addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => {
           desktopListener = listener;
         },
@@ -77,6 +79,10 @@ describe("App note workflow", () => {
 
   beforeEach(() => {
     vi.useRealTimers();
+    prefersDark = false;
+    window.localStorage.removeItem(THEME_STORAGE_KEY);
+    delete document.documentElement.dataset.theme;
+    document.head.innerHTML = '<meta name="theme-color" content="#eeede7">';
     mocks.deleteNote.mockReset().mockResolvedValue(undefined);
     mocks.saveNote.mockReset().mockResolvedValue(undefined);
     mocks.evaluateDocument.mockReset().mockImplementation(async (source: string) => ({
@@ -110,6 +116,71 @@ describe("App note workflow", () => {
     });
     expect(container.textContent).not.toContain("Loading notes...");
     expect(container.textContent).toContain("Note A");
+  });
+
+  it("applies a saved dark theme during initial render", async () => {
+    localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
+
+    await act(async () => { root.render(<App />); await flush(); });
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(document.querySelector('meta[name="theme-color"]')?.getAttribute("content")).toBe("#18191b");
+    expect(container.querySelector(".theme-toggle")?.getAttribute("aria-label")).toBe("Switch to light mode");
+  });
+
+  it("applies a saved light theme instead of the dark OS preference", async () => {
+    prefersDark = true;
+    localStorage.setItem(THEME_STORAGE_KEY, "light");
+    mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
+
+    await act(async () => { root.render(<App />); await flush(); });
+
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.querySelector('meta[name="theme-color"]')?.getAttribute("content")).toBe("#eeede7");
+    expect(container.querySelector(".theme-toggle")?.getAttribute("aria-label")).toBe("Switch to dark mode");
+  });
+
+  it("uses the OS preference when no theme has been saved", async () => {
+    prefersDark = true;
+    mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
+
+    await act(async () => { root.render(<App />); await flush(); });
+
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
+  });
+
+  it("uses the light OS preference when no theme has been saved", async () => {
+    mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
+
+    await act(async () => { root.render(<App />); await flush(); });
+
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBeNull();
+  });
+
+  it("toggles and persists the shared theme from the navigation controls", async () => {
+    mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
+    await act(async () => { root.render(<App />); await flush(); });
+
+    expect(container.querySelector(".notes-sidebar .theme-toggle")).not.toBeNull();
+    expect(container.querySelector(".notes-drawer .theme-toggle")).not.toBeNull();
+    const toggle = container.querySelector(".notes-sidebar .theme-toggle")!;
+
+    await act(async () => { click(toggle); await flush(); });
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
+    expect(toggle.getAttribute("aria-label")).toBe("Switch to light mode");
+    expect(toggle.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+
+    await act(async () => { click(container.querySelector("[aria-label='Open notes']")!); await flush(); });
+    const drawerToggle = container.querySelector(".notes-drawer[open] .theme-toggle")!;
+    await act(async () => { click(drawerToggle); await flush(); });
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
+    expect(drawerToggle.getAttribute("aria-label")).toBe("Switch to dark mode");
+    expect(toggle.getAttribute("aria-label")).toBe("Switch to dark mode");
   });
 
   it("evaluates restored content after the debounce without an edit", async () => {

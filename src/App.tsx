@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CalculationClient } from "./calculation/client";
 import { AppDialog } from "./components/AppDialog";
+import { ThemeToggle } from "./components/ThemeToggle";
 import { EditorPane } from "./editor/EditorPane";
 import { deleteNote, listNotes, saveNote } from "./storage/database";
 import { createSampleNote } from "./storage/sample";
 import type { DocumentRuntime, StoredNote } from "./types";
 import type { QalculateSymbolRegistry } from "./calculation/registry";
+import { applyTheme, getInitialTheme, THEME_STORAGE_KEY, type Theme } from "./theme";
 
 function createEmptyRuntime(status: DocumentRuntime["status"] = "idle", failure?: string): DocumentRuntime {
   return { lines: [], variables: [], engine: "development-fallback", status, failure };
@@ -78,6 +80,7 @@ type ScheduledSave = { timer: number; note: StoredNote };
 const EVALUATION_DEBOUNCE_MS = 120;
 
 export default function App() {
+  const [theme, setTheme] = useState<Theme>(() => getInitialTheme());
   const [notes, setNotes] = useState<StoredNote[]>([]);
   const notesRef = useRef<StoredNote[]>([]);
   const [activeNoteId, setActiveNoteId] = useState("");
@@ -96,6 +99,17 @@ export default function App() {
   const scheduledSaves = useRef(new Map<string, ScheduledSave>());
   const saveQueues = useRef(new Map<string, Promise<void>>());
   const activeContent = notes.find((note) => note.id === activeNoteId)?.content;
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    const nextTheme: Theme = theme === "light" ? "dark" : "light";
+    setTheme(nextTheme);
+    applyTheme(nextTheme);
+    window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+  };
 
   const replaceNotes = useCallback((nextNotes: StoredNote[]) => {
     notesRef.current = nextNotes;
@@ -347,6 +361,9 @@ export default function App() {
             </button>
           </div>
           {notesList}
+          <div className="sidebar-footer">
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          </div>
         </aside>
 
         <div className="workspace">
@@ -370,7 +387,7 @@ export default function App() {
                     : ""}
               </div>
             </div>
-           <EditorPane key={note.id} note={note} runtime={runtime} registry={symbolRegistry} onChange={handleEditorChange} />
+            <EditorPane key={note.id} note={note} runtime={runtime} registry={symbolRegistry} onChange={handleEditorChange} />
           </section>
         </div>
       </main>
@@ -393,6 +410,9 @@ export default function App() {
           <PlusIcon /><span>New note</span>
         </button>
         {notesList}
+        <div className="drawer-footer">
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        </div>
       </AppDialog>
 
       <AppDialog

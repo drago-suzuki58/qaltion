@@ -7,6 +7,16 @@
     <meta name="description" content="A plain-text calculation notebook powered by libqalculate." />
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>Qaltion</title>
+    <script>
+      (() => {
+        const stored = localStorage.getItem("qaltion-theme");
+        const theme = stored === "light" || stored === "dark"
+          ? stored
+          : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = theme;
+        document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#18191b" : "#eeede7");
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
