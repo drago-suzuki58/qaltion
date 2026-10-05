@@ -15,7 +15,11 @@ function createEmptyRuntime(status: DocumentRuntime["status"] = "idle", failure?
 
 function createBlankNote(): StoredNote {
   const note = createSampleNote();
-  return { ...note, title: "Untitled note", content: "" };
+  return { ...note, title: "", content: "" };
+}
+
+function getNoteDisplayTitle(note: StoredNote): string {
+  return note.title || "Untitled note";
 }
 
 function MenuIcon() {
@@ -55,16 +59,16 @@ function NotesList({ notes, activeNoteId, onSelect, onDelete }: NotesListProps) 
               type="button"
               className="note-option"
               aria-current={note.id === activeNoteId ? "page" : undefined}
-              aria-label={`Open ${note.title}`}
+              aria-label={`Open ${getNoteDisplayTitle(note)}`}
               onClick={() => onSelect(note.id)}
             >
-              <span className="note-option-title">{note.title}</span>
+              <span className="note-option-title">{getNoteDisplayTitle(note)}</span>
               <small>{new Date(note.lastOpenedAt).toLocaleDateString()}</small>
             </button>
             <button
               type="button"
               className="note-delete-button"
-              aria-label={`Delete ${note.title}`}
+              aria-label={`Delete ${getNoteDisplayTitle(note)}`}
               onClick={() => onDelete(note.id)}
             >
               <TrashIcon />
@@ -129,7 +133,7 @@ export default function App() {
       }))
       .catch(() => setSaveErrors((current) => ({
         ...current,
-        [note.id]: `Could not save “${note.title}”. Your changes remain open in this tab.`,
+        [note.id]: `Could not save “${getNoteDisplayTitle(note)}”. Your changes remain open in this tab.`,
       })))
       .finally(() => {
         if (saveQueues.current.get(note.id) === next) saveQueues.current.delete(note.id);
@@ -270,7 +274,7 @@ export default function App() {
   const renameNote = useCallback((title: string) => {
     updateNote(activeNoteIdRef.current, (note) => ({
       ...note,
-      title: title || "Untitled note",
+      title,
       updatedAt: Date.now(),
     }));
   }, [updateNote]);
@@ -371,14 +375,14 @@ export default function App() {
             <button type="button" className="icon-button" aria-label="Open notes" onClick={() => setDrawerOpen(true)}>
               <MenuIcon />
             </button>
-            <span className="mobile-title">{note.title}</span>
+            <span className="mobile-title">{getNoteDisplayTitle(note)}</span>
             <button type="button" className="icon-button" aria-label="New note" onClick={addNote}>
               <PlusIcon />
             </button>
           </header>
           <section className="document-shell" aria-label="Calculation note">
             <div className="note-heading">
-              <input aria-label="Note title" value={note.title} onChange={(event) => renameNote(event.target.value)} />
+              <input aria-label="Note title" placeholder="Untitled note" value={note.title} onChange={(event) => renameNote(event.target.value)} />
               <div className="engine-status" aria-live="polite">
                 {runtime.status === "pending" && runtime.lines.length === 0
                   ? "Loading calculation engine..."
@@ -424,7 +428,7 @@ export default function App() {
       >
         <h2 id="delete-modal-title">Delete note?</h2>
         <p className="delete-modal-copy">
-          {deleteTarget ? `“${deleteTarget.title}” will be permanently deleted.` : "This note will be permanently deleted."}
+          {deleteTarget ? `“${getNoteDisplayTitle(deleteTarget)}” will be permanently deleted.` : "This note will be permanently deleted."}
         </p>
         {deleteError && <div className="delete-error" role="alert">{deleteError}</div>}
         <div className="delete-modal-actions">

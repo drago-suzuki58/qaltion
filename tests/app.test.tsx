@@ -54,6 +54,11 @@ function click(element: Element): void {
   element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 }
 
+function inputText(input: HTMLInputElement, value: string): void {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 async function flush(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -116,6 +121,37 @@ describe("App note workflow", () => {
     });
     expect(container.textContent).not.toContain("Loading notes...");
     expect(container.textContent).toContain("Note A");
+  });
+
+  it("creates and saves a new note with an empty title and a placeholder", async () => {
+    vi.useFakeTimers();
+    mocks.listNotes.mockResolvedValue([storedNote("a", "Note A", "1 + 1")]);
+    await act(async () => { root.render(<App />); await flush(); });
+
+    await act(async () => { click(container.querySelector(".notes-sidebar .new-note-button")!); await flush(); });
+    const input = container.querySelector<HTMLInputElement>("[aria-label='Note title']")!;
+    expect(input.value).toBe("");
+    expect(input.placeholder).toBe("Untitled note");
+
+    await act(async () => { await vi.runAllTimersAsync(); await flush(); });
+    expect(mocks.saveNote).toHaveBeenCalledWith(expect.objectContaining({ title: "", content: "" }));
+  });
+
+  it("keeps a cleared title empty for saving and allows typing a new title", async () => {
+    vi.useFakeTimers();
+    mocks.listNotes.mockResolvedValue([storedNote("a", "A", "1 + 1")]);
+    await act(async () => { root.render(<App />); await flush(); });
+    const input = container.querySelector<HTMLInputElement>("[aria-label='Note title']")!;
+
+    await act(async () => { inputText(input, ""); await flush(); });
+    expect(input.value).toBe("");
+    await act(async () => { await vi.runAllTimersAsync(); await flush(); });
+    expect(mocks.saveNote).toHaveBeenLastCalledWith(expect.objectContaining({ id: "a", title: "" }));
+
+    await act(async () => { inputText(input, "Renamed"); await flush(); });
+    expect(input.value).toBe("Renamed");
+    await act(async () => { await vi.runAllTimersAsync(); await flush(); });
+    expect(mocks.saveNote).toHaveBeenLastCalledWith(expect.objectContaining({ id: "a", title: "Renamed" }));
   });
 
   it("applies a saved dark theme during initial render", async () => {

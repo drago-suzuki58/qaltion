@@ -348,6 +348,11 @@ button {
   padding: 0 0 3px;
 }
 
+.note-heading input::placeholder {
+  color: var(--placeholder);
+  opacity: 1;
+}
+
 .engine-status {
   min-height: 17px;
   margin-top: 3px;
